@@ -16,9 +16,7 @@ st.set_page_config(page_title="EQS Event Scheduling", layout="wide")
 # ---------- Authentication ----------
 AUTHORIZED_EMAILS = [
     "sues@eqstrategist.com",
-    "joec@eqstrategist.com",
     "doms@eqstrategist.com",
-    "bernardl@eqstrategist.com"
 ]
 
 # Default password
