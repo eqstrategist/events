@@ -1,123 +1,317 @@
 import streamlit as st
 from datetime import datetime
+from io import BytesIO
+
 import pandas as pd
-import calendar
-from core.utils import trainer_matches, get_events_for_day, marked_for_includes
 
-def trainer_page(df, user_email, settings):
-    TRAINERS, TRAINER_COLORS, trainer_name = settings["TRAINERS"], settings["TRAINER_COLORS"], settings["trainer_name"]
+from ui.calendar_grid import calendar_grid
+from ui.shared import trainer_legend
 
-    st.info(f"🎓 Welcome {trainer_name}! This is your personal calendar.")
-    st.header("📅 My Calendar")
 
-    trainer_events = df[trainer_matches(df["Trainer Calendar"], trainer_name)]
-    marked_events = df[
-        (df["Is Marked"]==True) &
-        (df["Marked For"].apply(lambda x: marked_for_includes(x, trainer_name)))
-    ]
-    df_my = pd.concat([trainer_events, marked_events], ignore_index=True)
+def trainer_page(df: pd.DataFrame, user_email: str, settings: dict):
+    """
+    Trainer view.
 
-    col1, col2 = st.columns([1,3])
-    with col1:
-        cy = datetime.now().year
-        selected_year = st.selectbox("Year", range(cy-1, cy+3), index=1)
-    with col2:
-        selected_month = st.selectbox("Month", range(1,13),
-                                      format_func=lambda x: datetime(2000,x,1).strftime("%B"),
-                                      index=datetime.now().month-1)
+    app.py calls:
 
-    st.subheader("Your Color")
-    st.markdown(
-        f"<div style='background:{TRAINER_COLORS.get(trainer_name,'#ccc')};padding:10px;border-radius:5px;text-align:center;font-weight:bold;color:black;max-width:200px;'>{trainer_name}</div>",
-        unsafe_allow_html=True
-    )
-    st.divider()
+        trainer_page(
+            df,
+            user_email,
+            {
+                "TRAINERS": TRAINERS,
+                "TRAINER_COLORS": TRAINER_COLORS,
+                "trainer_name": trainer_name,
+            },
+        )
 
-    month_events = df_my[
-        (pd.to_datetime(df_my["Date"]).dt.month==selected_month) &
-        (pd.to_datetime(df_my["Date"]).dt.year==selected_year)
+    This page provides:
+      - Tab 1: 📅 My Calendar   (visual month view for this trainer + "View Details" by day)
+      - Tab 2: 🔍 My Events     (read-only filtered list of this trainer's events)
+
+    Trainers CANNOT:
+      - Edit events
+      - Delete events
+      - Duplicate events
+      - Filter by trainer (they only see their own events)
+    """
+
+    TRAINERS = settings.get("TRAINERS", [])
+    TRAINER_COLORS = settings.get("TRAINER_COLORS", {})
+    trainer_name = settings.get("trainer_name", "Trainer")
+
+    st.title(f"🎓 Trainer View – {trainer_name}")
+
+    # Restrict dataframe to this trainer's events only (supports multi-trainer strings)
+    df_trainer = df[
+        df["Trainer Calendar"].astype(str).str.contains(trainer_name, case=False, na=False)
     ].copy()
 
-    cal = calendar.monthcalendar(selected_year, selected_month)
-    days_of_week = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
-    header_cols = st.columns(7)
-    for i, dn in enumerate(days_of_week):
-        with header_cols[i]:
-            st.markdown(f"<div style='text-align:center;font-weight:bold;padding:5px;'>{dn}</div>",
-                        unsafe_allow_html=True)
+    tab1, tab2 = st.tabs(["📅 My Calendar", "🔍 My Events"])
 
-    for week in cal:
-        week_cols = st.columns(7)
-        for i, day in enumerate(week):
-            with week_cols[i]:
-                if day==0:
-                    st.markdown("<div style='height:120px;border:1px solid #ddd;border-radius:5px;'></div>",
-                                unsafe_allow_html=True)
-                else:
-                    day_date = datetime(selected_year,selected_month,day).date()
-                    day_events = get_events_for_day(month_events, day_date)
+    # -------------------------------------------------------------------------
+    # TAB 1 – MY CALENDAR
+    # -------------------------------------------------------------------------
+    with tab1:
+        st.subheader("📅 My Calendar")
 
-                    # check blocked for me
-                    reason = None
-                    marks = df[
-                        (df["Is Marked"]==True) &
-                        (pd.to_datetime(df["Date"]).dt.date==day_date)
-                    ]
-                    for _,m in marks.iterrows():
-                        if marked_for_includes(m.get("Marked For","All"), trainer_name):
-                            reason = str(m.get("Course/Description","Blocked"))
-                            break
+        current_year = datetime.now().year
+        col_year, col_month = st.columns([1, 3])
+        with col_year:
+            selected_year = st.selectbox(
+                "Year",
+                range(current_year - 1, current_year + 3),
+                index=1,
+                key="trainer_calendar_year",
+            )
+        with col_month:
+            selected_month = st.selectbox(
+                "Month",
+                range(1, 13),
+                format_func=lambda x: datetime(2000, x, 1).strftime("%B"),
+                index=datetime.now().month - 1,
+                key="trainer_calendar_month",
+            )
 
-                    if reason:
-                        disp=(reason[:18]+"...") if len(reason)>18 else reason
-                        st.markdown(f"""
-                        <div style='border:3px solid #FF0000;border-radius:5px;padding:5px;height:120px;background:#FFE0E0;'>
-                            <div style='text-align:center;font-weight:bold;font-size:18px;color:#FF0000;'>{day}</div>
-                            <div style='text-align:center;font-size:22px;margin-top:4px;'>🚫</div>
-                            <div style='text-align:center;font-size:11px;color:#FF0000;font-weight:bold;'>{disp}</div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    elif len(day_events):
-                        st.markdown(f"""
-                        <div style='border:2px solid #333;border-radius:5px;padding:5px;height:120px;background:{TRAINER_COLORS.get(trainer_name,'#ccc')};'>
-                            <div style='text-align:center;font-weight:bold;font-size:18px;color:#000;'>{day}</div>
-                            <div style='text-align:center;font-size:12px;margin-top:5px;color:#000;'>{len(day_events)} event(s)</div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    else:
-                        st.markdown(f"""
-                        <div style='border:1px solid #ddd;border-radius:5px;padding:5px;height:120px;background:#fff;'>
-                            <div style='text-align:center;font-weight:bold;font-size:18px;color:#999;'>{day}</div>
-                        </div>
-                        """, unsafe_allow_html=True)
+        # Trainer's own color legend
+        st.subheader("Your Color")
+        trainer_legend(
+            [trainer_name],
+            {trainer_name: TRAINER_COLORS.get(trainer_name, "#CCCCCC")},
+        )
+        st.divider()
 
-                    if st.button("View Details", key=f"trainer_view_{selected_year}_{selected_month}_{day}", use_container_width=True):
-                        st.session_state["selected_day"] = day_date
+        # Filter to this trainer & this month
+        month_events = df_trainer[
+            (pd.to_datetime(df_trainer["Date"]).dt.year == selected_year)
+            & (pd.to_datetime(df_trainer["Date"]).dt.month == selected_month)
+        ].copy()
 
-    st.divider()
-    # day details for trainer
-    if "selected_day" in st.session_state and st.session_state["selected_day"]:
-        sel_day = st.session_state["selected_day"]
-        st.subheader(f"📌 My Events on {sel_day.strftime('%A, %d %B %Y')}")
-        day_all = get_events_for_day(month_events, sel_day)
-        if len(day_all)==0:
-            st.info("No events on this day.")
+        # Use calendar grid with a "trainer" prefix, but the grid sets st.session_state["selected_day"]
+        calendar_grid(
+            month_events,
+            selected_year,
+            selected_month,
+            [trainer_name],
+            {trainer_name: TRAINER_COLORS.get(trainer_name, "#CCCCCC")},
+            role_prefix="trainer",
+        )
+
+        st.divider()
+
+        # -------------------------------
+        # "View Details" behaviour
+        # calendar_grid sets st.session_state["selected_day"] = day_date
+        # -------------------------------
+        sel_day = st.session_state.get("selected_day", None)
+
+        if sel_day is not None:
+            # sel_day might be datetime or date
+            if isinstance(sel_day, datetime):
+                day_date = sel_day.date()
+            else:
+                day_date = sel_day
+
+            st.subheader(f"📌 Your Events on {day_date.strftime('%A, %d %B %Y')}")
+
+            day_events = month_events[
+                pd.to_datetime(month_events["Date"]).dt.date == day_date
+            ].sort_values("Date")
+
+            if len(day_events) == 0:
+                st.info("No events for you on this day.")
+            else:
+                st.write(f"**Total: {len(day_events)} event(s)**")
+                for _, ev in day_events.iterrows():
+                    with st.expander(
+                        f"📅 {pd.to_datetime(ev['Date']).strftime('%b %d')} – {ev['Title']}",
+                        expanded=True,
+                    ):
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.write(f"**Type:** {ev['Type']}")
+                            st.write(f"**Status:** {ev['Status']}")
+                        with col2:
+                            st.write(f"**Client:** {ev['Client']}")
+                            st.write(f"**Source:** {ev['Source']}")
+                            st.write(f"**Medium:** {ev['Medium']}")
+                        with col3:
+                            st.write(f"**Location:** {ev['Location']}")
+                            st.write(f"**Invoiced:** {ev['Invoiced']}")
+
+                        st.write(f"**Course/Description:** {ev['Course/Description']}")
+                        notes = str(ev.get("Notes", ""))
+                        billing = str(ev.get("Billing", ""))
+                        if notes not in ["nan", "", None]:
+                            st.write(f"**Notes:** {notes}")
+                        if billing not in ["nan", "", None]:
+                            st.write(f"**Billing:** {billing}")
+
+                        st.markdown("---")
+                        st.write(
+                            f"**Last Modified:** {ev.get('Date Modified','')} | "
+                            f"**Action:** {ev.get('Action Type','')} | "
+                            f"**By:** {ev.get('Modified By','')}"
+                        )
+
+            if st.button("❌ Close Day Details", key="trainer_close_day_details"):
+                st.session_state["selected_day"] = None
+                st.rerun()
+
         else:
-            blocked_today = day_all[day_all.get("Is Marked", False)==True]
-            normal_today = day_all[day_all.get("Is Marked", False)!=True]
-            for _, ev in blocked_today.iterrows():
-                with st.expander(f"🚫 BLOCKED: {ev.get('Course/Description','')}", expanded=True):
-                    st.error("Blocked for you.")
-                    st.write(f"Reason: {ev.get('Course/Description','')}")
-            for _, ev in normal_today.iterrows():
-                with st.expander(f"📅 {ev.get('Title','')}", expanded=True):
-                    st.write(f"Type: {ev.get('Type','')} | Status: {ev.get('Status','')}")
-                    st.write(f"Client: {ev.get('Client','')} | Source: {ev.get('Source','')}")
-                    st.write(f"Medium: {ev.get('Medium','')} | Location: {ev.get('Location','')}")
-                    st.write(f"Course: {ev.get('Course/Description','')}")
+            # No specific day selected: show all events for this month (as a list)
+            st.subheader(
+                f"📋 Your Events – {datetime(2000, selected_month, 1).strftime('%B')} {selected_year}"
+            )
 
-        if st.button("❌ Close Day Details", key="trainer_close_day"):
-            st.session_state["selected_day"]=None
-            st.rerun()
+            if len(month_events) == 0:
+                st.info("No events found for this month.")
+            else:
+                month_events_sorted = month_events.sort_values("Date")
+                st.write(f"**Total: {len(month_events_sorted)} event(s)**")
 
+                for _, ev in month_events_sorted.iterrows():
+                    with st.expander(
+                        f"📅 {pd.to_datetime(ev['Date']).strftime('%b %d')} – {ev['Title']}"
+                    ):
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.write(f"**Type:** {ev['Type']}")
+                            st.write(f"**Status:** {ev['Status']}")
+                        with col2:
+                            st.write(f"**Client:** {ev['Client']}")
+                            st.write(f"**Source:** {ev['Source']}")
+                            st.write(f"**Medium:** {ev['Medium']}")
+                        with col3:
+                            st.write(f"**Location:** {ev['Location']}")
+                            st.write(f"**Invoiced:** {ev['Invoiced']}")
+
+                        st.write(f"**Course/Description:** {ev['Course/Description']}")
+                        notes = str(ev.get("Notes", ""))
+                        billing = str(ev.get("Billing", ""))
+                        if notes not in ["nan", "", None]:
+                            st.write(f"**Notes:** {notes}")
+                        if billing not in ["nan", "", None]:
+                            st.write(f"**Billing:** {billing}")
+
+                        st.markdown("---")
+                        st.write(
+                            f"**Last Modified:** {ev.get('Date Modified','')} | "
+                            f"**Action:** {ev.get('Action Type','')} | "
+                            f"**By:** {ev.get('Modified By','')}"
+                        )
+
+    # -------------------------------------------------------------------------
+    # TAB 2 – MY EVENTS (READ-ONLY MANAGE-LIKE VIEW)
+    # -------------------------------------------------------------------------
+    with tab2:
+        st.subheader("🔍 My Events")
+      
+
+        # ---- Filters (date range, status, source, client) ----
+        col_filters = st.columns(4)
+
+        # 1) Date range toggle
+        with col_filters[0]:
+            use_date_range = st.checkbox("Filter by Date Range", value=False)
+
+        date_from = date_to = None
+        if use_date_range:
+            col_dates = st.columns(2)
+            with col_dates[0]:
+                date_from = st.date_input("From", key="trainer_events_from")
+            with col_dates[1]:
+                date_to = st.date_input("To", key="trainer_events_to")
+
+        # Build choices for status and source based on the trainer's own data
+        status_values = sorted(df_trainer["Status"].dropna().unique().tolist())
+        source_values = sorted(df_trainer["Source"].dropna().unique().tolist())
+
+        status_options = ["All"] + status_values
+        source_options = ["All"] + source_values
+
+        with col_filters[1]:
+            status_filter = st.selectbox(
+                "Status", status_options, key="trainer_events_status"
+            )
+
+        with col_filters[2]:
+            source_filter = st.selectbox(
+                "Source", source_options, key="trainer_events_source"
+            )
+
+        with col_filters[3]:
+            client_search = st.text_input(
+                "Client",
+                key="trainer_events_client",
+                placeholder="Search client name...",
+            )
+
+        # ---- Apply filters to trainer's own events ----
+        result = df_trainer.copy()
+
+        # Date range
+        if use_date_range and date_from and date_to:
+            if date_to < date_from:
+                st.warning("⚠️ 'To' date cannot be before 'From' date.")
+            else:
+                result = result[
+                    (pd.to_datetime(result["Date"]).dt.date >= date_from)
+                    & (pd.to_datetime(result["Date"]).dt.date <= date_to)
+                ]
+
+        # Status filter
+        if status_filter != "All":
+            result = result[result["Status"] == status_filter]
+
+        # Source filter
+        if source_filter != "All":
+            result = result[result["Source"] == source_filter]
+
+        # Client text search
+        if client_search:
+            result = result[
+                result["Client"].astype(str).str.contains(
+                    client_search, case=False, na=False
+                )
+            ]
+
+        st.markdown("---")
+        st.write(f"**Showing {len(result)} event(s)**")
+
+        if len(result) == 0:
+            st.info("No events match the current filters.")
+        else:
+            # Sort by date and show as a table (view-only)
+            result = result.sort_values("Date")
+
+            st.dataframe(
+                result[
+                    [
+                        "Date",
+                        "Title",
+                        "Status",
+                        "Source",
+                        "Client",
+                        "Course/Description",
+                        "Medium",
+                        "Location",
+                        "Invoiced",
+                    ]
+                ],
+                use_container_width=True,
+            )
+
+            # Optional: allow trainer to download their filtered data (still read-only)
+            towrite = BytesIO()
+            result.to_excel(towrite, index=False, engine="openpyxl")
+            towrite.seek(0)
+
+            st.download_button(
+                "⬇️ Download My Filtered Events",
+                data=towrite,
+                file_name="My_Events.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+
+    # Trainers do not modify df, so just return it unchanged
     return df
