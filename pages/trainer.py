@@ -295,7 +295,7 @@ def trainer_page(df: pd.DataFrame, user_email: str, settings: dict):
                         "Course/Description",
                         "Medium",
                         "Location",
-                        "Invoiced",
+
                     ]
                 ],
                 use_container_width=True,
