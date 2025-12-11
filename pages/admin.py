@@ -1,3 +1,5 @@
+# pages/admin.py
+
 import streamlit as st
 from datetime import datetime, timedelta
 import pandas as pd
@@ -41,13 +43,7 @@ def admin_page(df, user_email, settings):
     st.title("🗓️ EQS Event Scheduling – Admin")
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        [
-            "➕ New Event",
-            "🔍 Manage Events",
-            "📅 Calendar View",
-            "🚫 Mark Dates",
-            "⚙️ Settings",
-        ]
+        ["➕ New Event", "🔍 Manage Events", "📅 Calendar View", "🚫 Mark Dates", "⚙️ Settings"]
     )
 
     # -------------------------------------------------------------------------
@@ -210,9 +206,7 @@ def admin_page(df, user_email, settings):
                                 key=f"admin_cal_edit_btn_{event_idx}",
                                 use_container_width=True,
                             ):
-                                st.session_state["admin_cal_edit_idx"] = int(
-                                    event_idx
-                                )
+                                st.session_state["admin_cal_edit_idx"] = int(event_idx)
                                 st.rerun()
 
             # Close day details
@@ -233,7 +227,10 @@ def admin_page(df, user_email, settings):
 
             selected_event = df.loc[edit_idx]
 
-            with st.form("admin_calendar_edit_form"):
+            # clear_on_submit=False (default) so we keep values on failed validation
+            with st.form("admin_calendar_edit_form", clear_on_submit=False):
+                st.write(f"**Editing:** {selected_event['Title']}")
+
                 c1, c2, c3 = st.columns(3)
                 with c1:
                     edit_start_date = st.date_input(
@@ -244,25 +241,37 @@ def admin_page(df, user_email, settings):
                         "End Date",
                         value=pd.to_datetime(selected_event["Date"]).date(),
                     )
+                    st.info("💡 Changing dates will create separate events for each day")
+
                 with c2:
                     edit_type = st.selectbox(
                         "Type",
                         TYPES,
                         index=TYPES.index(selected_event["Type"]),
                     )
-                    # STATUSES[0] is "All" – for editing we use the real statuses
-                    real_statuses = STATUSES[1:]
+
+                    real_statuses = (
+                        STATUSES[1:] if STATUSES and STATUSES[0] == "All" else STATUSES
+                    )
                     edit_status = st.selectbox(
                         "Status",
                         real_statuses,
-                        index=real_statuses.index(selected_event["Status"]),
+                        index=real_statuses.index(selected_event["Status"])
+                        if selected_event["Status"] in real_statuses
+                        else 0,
                     )
-                    real_sources = SOURCES[1:]
+
+                    real_sources = (
+                        SOURCES[1:] if SOURCES and SOURCES[0] == "All" else SOURCES
+                    )
                     edit_source = st.selectbox(
                         "Source",
                         real_sources,
-                        index=real_sources.index(selected_event["Source"]),
+                        index=real_sources.index(selected_event["Source"])
+                        if selected_event["Source"] in real_sources
+                        else 0,
                     )
+
                 with c3:
                     edit_client = st.text_input(
                         "Client", value=selected_event["Client"]
@@ -281,9 +290,8 @@ def admin_page(df, user_email, settings):
                     edit_trainer = st.multiselect(
                         "Trainer Calendar",
                         ["All"] + TRAINERS,
-                        default=current_trainers
-                        if current_trainers
-                        else ["All"],
+                        default=current_trainers if current_trainers else ["All"],
+                        help="Select 'All' to show on all trainers' calendars, or select specific trainer(s)",
                     )
                     edit_medium = st.selectbox(
                         "Medium",
@@ -293,7 +301,6 @@ def admin_page(df, user_email, settings):
                         else 0,
                     )
 
-                # Location, Billing, Invoiced, Notes
                 edit_location = st.selectbox(
                     "Location",
                     LOCATIONS,
@@ -302,8 +309,7 @@ def admin_page(df, user_email, settings):
                     else 0,
                 )
                 edit_billing = st.text_area(
-                    "Billing Notes",
-                    value=selected_event.get("Billing", ""),
+                    "Billing Notes", value=selected_event.get("Billing", "")
                 )
                 edit_invoiced = st.selectbox(
                     "Invoiced",
@@ -313,82 +319,99 @@ def admin_page(df, user_email, settings):
                     else 1,
                 )
                 edit_notes = st.text_area(
-                    "Additional Notes",
-                    value=selected_event.get("Notes", ""),
+                    "Additional Notes", value=selected_event.get("Notes", "")
                 )
+
+                # ---------- Date range confirmation ----------
+                num_days = (edit_end_date - edit_start_date).days + 1
+                long_range = num_days > 5
+
+                if long_range:
+                    st.warning(
+                        f"⚠️ You selected a date range of **{num_days} days**.\n\n"
+                        "This will create **one event PER DAY** in that range."
+                    )
+                    confirm_long = st.checkbox(
+                        "I understand and want to update events for this entire date range.",
+                        key="confirm_cal_edit_long_range",
+                    )
+                else:
+                    confirm_long = True
 
                 col_sa, col_sb = st.columns(2)
                 with col_sa:
-                    save_btn = st.form_submit_button(
+                    save_changes = st.form_submit_button(
                         "💾 Save Changes", use_container_width=True
                     )
                 with col_sb:
-                    cancel_btn = st.form_submit_button(
+                    cancel_edit = st.form_submit_button(
                         "❌ Cancel", use_container_width=True
                     )
 
-            if save_btn:
+            if save_changes:
                 if not edit_trainer:
                     st.error("❌ Please select at least one trainer!")
                 elif edit_end_date < edit_start_date:
                     st.error("❌ End Date cannot be before Start Date!")
-                else:
-                    # Drop original event
-                    df_drop = df.drop(index=edit_idx).reset_index(drop=True)
-
-                    # Build trainer list string
-                    trainer_list = (
-                        ", ".join(TRAINERS)
-                        if "All" in edit_trainer
-                        else ", ".join(edit_trainer)
+                elif not confirm_long:
+                    st.error(
+                        "❌ Please tick the confirmation box above to apply this long date range."
                     )
+                else:
+                    df = df.drop(edit_idx).reset_index(drop=True)
 
-                    # Build new rows for each day in range
+                    # Determine which trainers to create events for
+                    if "All" in edit_trainer:
+                        trainers_to_assign = TRAINERS
+                    else:
+                        trainers_to_assign = edit_trainer
+
                     events_to_add = []
-                    cur = edit_start_date
-                    while cur <= edit_end_date:
-                        row = {
-                            "Date": cur,
-                            "Type": edit_type,
-                            "Status": edit_status,
-                            "Source": edit_source,
-                            "Client": edit_client,
-                            "Course/Description": edit_course,
-                            "Trainer Calendar": trainer_list,
-                            "Medium": edit_medium,
-                            "Location": edit_location,
-                            "Billing": edit_billing,
-                            "Invoiced": edit_invoiced,
-                            "Notes": edit_notes,
-                            "Date Modified": datetime.now().strftime(
-                                "%Y-%m-%d %H:%M"
-                            ),
-                            "Action Type": "Modified (Calendar)",
-                            "Modified By": user_email,
-                            "Is Marked": False,
-                            "Marked For": "",
-                        }
-                        row["Title"] = generate_title(row)
-                        events_to_add.append(row)
-                        cur += timedelta(days=1)
+                    current_date = edit_start_date
+
+                    while current_date <= edit_end_date:
+                        for t_name in trainers_to_assign:
+                            updated_row = {
+                                "Date": current_date,
+                                "Type": edit_type,
+                                "Status": edit_status,
+                                "Source": edit_source,
+                                "Client": edit_client,
+                                "Course/Description": edit_course,
+                                "Trainer Calendar": t_name,
+                                "Medium": edit_medium,
+                                "Location": edit_location,
+                                "Billing": edit_billing,
+                                "Invoiced": edit_invoiced,
+                                "Notes": edit_notes,
+                                "Date Modified": datetime.now().strftime(
+                                    "%Y-%m-%d %H:%M"
+                                ),
+                                "Action Type": "Modified (Calendar)",
+                                "Modified By": user_email,
+                                "Is Marked": False,
+                            }
+                            updated_row["Title"] = generate_title(updated_row)
+                            events_to_add.append(updated_row)
+                        current_date += timedelta(days=1)
 
                     df = pd.concat(
-                        [df_drop, pd.DataFrame(events_to_add)],
-                        ignore_index=True,
+                        [df, pd.DataFrame(events_to_add)], ignore_index=True
                     )
                     save_events(df)
                     append_audit(
                         user_email,
-                        "Edited Event (Calendar)",
+                        "Edit Event (Calendar)",
                         f"{len(events_to_add)} day(s)",
                     )
-                    st.success("✅ Updated event(s) from calendar view!")
                     st.session_state.pop("admin_cal_edit_idx", None)
+                    st.success("✅ Event updated successfully!")
                     st.rerun()
 
-            if cancel_btn:
+            if cancel_edit:
                 st.session_state.pop("admin_cal_edit_idx", None)
                 st.info("Edit canceled.")
+                st.rerun()
 
     # -------------------------------------------------------------------------
     # TAB 4 – MARK DATES
