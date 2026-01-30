@@ -3,6 +3,8 @@ import pandas as pd
 from datetime import datetime
 from openpyxl import load_workbook
 from .config import EXCEL_FILE, EVENTS_SHEET, SHEETS
+from .security import hash_password
+import fcntl
 
 BACKUP_DIR = "backups"
 
@@ -43,8 +45,19 @@ def read_sheet(sheet_name, default_df):
 
 def write_sheet(sheet_name, df):
     ensure_workbook()
-    with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
-        df.to_excel(writer, sheet_name=sheet_name, index=False)
+    lock_file = f"{EXCEL_FILE}.lock"
+    try:
+        with open(lock_file, "w") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
+                    df.to_excel(writer, sheet_name=sheet_name, index=False)
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    except Exception:
+        # Fallback without locking if lock fails
+        with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
 
 def append_audit(user, action, details=""):
     audit_df = read_sheet("Audit", pd.DataFrame(columns=["Timestamp","User","Action","Details"]))
@@ -59,16 +72,10 @@ def append_audit(user, action, details=""):
 def seed_defaults_if_empty():
     users_df = read_sheet("Users", pd.DataFrame(columns=["Email","Role","TrainerName","Active","Password"]))
     if len(users_df) == 0:
-        DEFAULT_PASSWORD = "Welcome123"
+        # Create a default admin account - password should be changed on first login
+        default_hashed_password = hash_password("ChangeMe123!")
         seed_users = [
-            ("doms@eqstrategist.com", "admin", "", True, DEFAULT_PASSWORD),
-            ("sues@eqstrategist.com", "admin", "", True, DEFAULT_PASSWORD),
-            ("bernardl@eqstrategist.com", "view_only", "", True, DEFAULT_PASSWORD),
-            ("nabinp@eqstrategist.com", "view_only", "", True, DEFAULT_PASSWORD),
-            ("joec@eqstrategist.com", "view_only", "", True, DEFAULT_PASSWORD),
-            ("dalew@eqstrategist.com", "trainer", "Dale", True, DEFAULT_PASSWORD),
-            ("andrewd@eqstrategist.com", "trainer", "Andrew", True, DEFAULT_PASSWORD),
-            ("jackr@eqstrategist.com", "trainer", "Jack", True, DEFAULT_PASSWORD),
+            ("admin@example.com", "admin", "", True, default_hashed_password),
         ]
         users_df = pd.DataFrame(seed_users, columns=["Email","Role","TrainerName","Active","Password"])
         write_sheet("Users", users_df)
@@ -175,14 +182,20 @@ def load_events():
 
 def save_events(df0):
     max_retries = 3
+    lock_file = f"{EXCEL_FILE}.lock"
     for attempt in range(max_retries):
         try:
             cols = df0.columns.tolist()
             if "Title" in cols:
                 cols.remove("Title")
                 df0 = df0[["Title"] + cols]
-            with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
-                df0.to_excel(writer, sheet_name=EVENTS_SHEET, index=False)
+            with open(lock_file, "w") as lock:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                try:
+                    with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
+                        df0.to_excel(writer, sheet_name=EVENTS_SHEET, index=False)
+                finally:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
             return True
         except PermissionError:
             if attempt < max_retries-1:
@@ -265,6 +278,27 @@ def restore_backup(filename, user_email=""):
 def import_backup(uploaded_file, user_email=""):
     """Import a backup from an uploaded file."""
     try:
+        # Validate file size (max 50MB)
+        file_size = len(uploaded_file.getbuffer())
+        if file_size > 50 * 1024 * 1024:
+            return False, "File too large. Maximum size is 50MB."
+
+        # Validate it's a valid Excel file by trying to read it
+        try:
+            uploaded_file.seek(0)
+            test_wb = load_workbook(uploaded_file, read_only=True)
+            sheet_names = test_wb.sheetnames
+            test_wb.close()
+            uploaded_file.seek(0)
+
+            # Check for expected sheets
+            required_sheets = [EVENTS_SHEET, "Users"]
+            missing = [s for s in required_sheets if s not in sheet_names]
+            if missing:
+                return False, f"Invalid backup file. Missing required sheets: {', '.join(missing)}"
+        except Exception as e:
+            return False, f"Invalid Excel file: {str(e)}"
+
         # Create a backup of current data before importing
         create_backup(user_email)
 

@@ -1,11 +1,12 @@
 import os, time
 import streamlit as st
 from .storage import read_sheet, write_sheet, append_audit, load_settings
+from .security import hash_password, verify_password, is_password_hashed
 import pandas as pd
 
 def refresh_session_passwords(users_df):
     st.session_state.user_passwords = {
-        row["Email"].lower(): row.get("Password", "Welcome123")
+        row["Email"].lower(): row.get("Password", "")
         for _, row in users_df.iterrows()
     }
 
@@ -60,7 +61,8 @@ def login_page(AUTHORIZED_EMAILS, users_df):
                 if submit:
                     email_lower = email.lower().strip()
                     if email_lower in AUTHORIZED_EMAILS:
-                        if st.session_state.user_passwords.get(email_lower) == password:
+                        stored_password = st.session_state.user_passwords.get(email_lower, "")
+                        if verify_password(password, stored_password):
                             st.session_state.authenticated = True
                             st.session_state.user_email = email_lower
                             append_audit(email_lower, "Login", "User logged in")
@@ -88,10 +90,12 @@ def login_page(AUTHORIZED_EMAILS, users_df):
                 if submit_reset:
                     email_lower = email.lower().strip()
                     if email_lower in AUTHORIZED_EMAILS:
-                        if st.session_state.user_passwords.get(email_lower) == old_password:
+                        stored_password = st.session_state.user_passwords.get(email_lower, "")
+                        if verify_password(old_password, stored_password):
                             if new_password == confirm_password:
                                 if len(new_password) >= 6:
-                                    users_df.loc[users_df["Email"].str.lower()==email_lower, "Password"] = new_password
+                                    hashed_password = hash_password(new_password)
+                                    users_df.loc[users_df["Email"].str.lower()==email_lower, "Password"] = hashed_password
                                     write_sheet("Users", users_df)
                                     refresh_session_passwords(users_df)
                                     append_audit(email_lower, "Password Reset", "User reset password")

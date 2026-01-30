@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from core.storage import read_sheet, write_sheet, create_backup, list_backups, delete_backup, restore_backup, import_backup
 from core.config import LIST_CATEGORIES
+from core.security import hash_password
 
 def settings_tab(users_df, trainers_df, lists_df, rules_df, defaults_df, notif_df, EXCEL_FILE, refresh_passwords_cb, user_email=""):
     st.header("⚙️ Settings (Admin Only)")
@@ -40,10 +41,14 @@ def settings_tab(users_df, trainers_df, lists_df, rules_df, defaults_df, notif_d
         new_pw = st.text_input("New Password", type="password")
         if st.button("Reset Password"):
             if reset_email and new_pw:
-                edited_users.loc[edited_users["Email"]==reset_email, "Password"] = new_pw
-                write_sheet("Users", edited_users)
-                refresh_passwords_cb()
-                st.success("Password reset.")
+                if len(new_pw) < 6:
+                    st.error("Password must be at least 6 characters.")
+                else:
+                    hashed_pw = hash_password(new_pw)
+                    edited_users.loc[edited_users["Email"]==reset_email, "Password"] = hashed_pw
+                    write_sheet("Users", edited_users)
+                    refresh_passwords_cb()
+                    st.success("Password reset.")
             else:
                 st.error("Pick user and password.")
 

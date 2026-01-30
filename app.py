@@ -45,7 +45,7 @@ AUTHORIZED_EMAILS = users_df[users_df["Active"]==True]["Email"].str.lower().toli
 
 def refresh_pw_cb():
     global users_df
-    users_df = users_df = users_df = users_df  # no-op; file write already done
+    users_df, _, _, _, _, _ = load_settings()  # Reload users from file
     refresh_session_passwords(users_df)
 
 user_email = ensure_login(AUTHORIZED_EMAILS, users_df)
