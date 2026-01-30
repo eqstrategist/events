@@ -42,12 +42,18 @@ def validate_email(email):
 
 def generate_title(row):
     base = f"{row['Status']}-{row['Source']}-{row['Client']} {row['Course/Description']}"
-    if row.get('Type') == 'W':
-        base += f" ({row.get('Medium','')}) {row.get('Trainer Calendar','')} {row.get('Location','')}"
-    elif row.get('Type') == 'M':
-        base += f" {row.get('Trainer Calendar','')} {row.get('Location','')}"
-    else:
-        base += f" {row.get('Trainer Calendar','')}"
+    medium = row.get('Medium', '')
+    trainer = row.get('Trainer Calendar', '')
+    location = row.get('Location', '')
+
+    # Include Medium for all event types
+    if medium:
+        base += f" ({medium})"
+    if trainer:
+        base += f" {trainer}"
+    if location:
+        base += f" {location}"
+
     return str(base).strip()
 
 def trainer_matches(series, trainer):

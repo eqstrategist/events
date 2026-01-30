@@ -20,16 +20,54 @@ def settings_tab(users_df, trainers_df, lists_df, rules_df, defaults_df, notif_d
 
     with tabs[0]:
         st.subheader("User & Role Management")
+
+        # Add New User Form
+        st.markdown("#### Add New User")
+        with st.form("add_user_form", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            with col1:
+                new_email = st.text_input("Email")
+                new_role = st.selectbox("Role", ["admin", "view_only", "trainer"])
+            with col2:
+                new_trainer_name = st.text_input("Trainer Name (if trainer role)")
+                new_password = st.text_input("Password", type="password")
+
+            if st.form_submit_button("➕ Add User", use_container_width=True):
+                if not new_email or not new_email.strip():
+                    st.error("Email is required.")
+                elif not new_password or len(new_password) < 6:
+                    st.error("Password must be at least 6 characters.")
+                elif new_email.lower().strip() in users_df["Email"].str.lower().tolist():
+                    st.error("User with this email already exists.")
+                else:
+                    new_user = pd.DataFrame([{
+                        "Email": new_email.lower().strip(),
+                        "Role": new_role,
+                        "TrainerName": new_trainer_name if new_role == "trainer" else "",
+                        "Active": True,
+                        "Password": hash_password(new_password)
+                    }])
+                    updated_users = pd.concat([users_df, new_user], ignore_index=True)
+                    write_sheet("Users", updated_users)
+                    refresh_passwords_cb()
+                    st.success(f"User '{new_email}' added successfully!")
+                    st.rerun()
+
+        st.divider()
+
+        # Existing Users Table
+        st.markdown("#### Existing Users")
         edited_users = st.data_editor(
             users_df,
             use_container_width=True,
-            num_rows="dynamic",
+            num_rows="fixed",
             column_config={
                 "Role": st.column_config.SelectboxColumn("Role", options=["admin","view_only","trainer"]),
                 "Active": st.column_config.CheckboxColumn("Active"),
+                "Password": st.column_config.TextColumn("Password", disabled=True),
             }
         )
-        if st.button("💾 Save Users"):
+        if st.button("💾 Save Changes"):
             edited_users["Email"] = edited_users["Email"].str.lower().str.strip()
             write_sheet("Users", edited_users)
             refresh_passwords_cb()
@@ -37,9 +75,12 @@ def settings_tab(users_df, trainers_df, lists_df, rules_df, defaults_df, notif_d
             st.rerun()
 
         st.divider()
-        reset_email = st.selectbox("User", edited_users["Email"].tolist() if len(edited_users) else [])
-        new_pw = st.text_input("New Password", type="password")
-        if st.button("Reset Password"):
+
+        # Reset Password Section
+        st.markdown("#### Reset User Password")
+        reset_email = st.selectbox("Select User", edited_users["Email"].tolist() if len(edited_users) else [])
+        new_pw = st.text_input("New Password", type="password", key="reset_pw_input")
+        if st.button("🔑 Reset Password"):
             if reset_email and new_pw:
                 if len(new_pw) < 6:
                     st.error("Password must be at least 6 characters.")
@@ -51,6 +92,22 @@ def settings_tab(users_df, trainers_df, lists_df, rules_df, defaults_df, notif_d
                     st.success("Password reset.")
             else:
                 st.error("Pick user and password.")
+
+        st.divider()
+
+        # Delete User Section
+        st.markdown("#### Delete User")
+        delete_email = st.selectbox("Select User to Delete", edited_users["Email"].tolist() if len(edited_users) else [], key="delete_user_select")
+        if st.button("🗑️ Delete User", type="secondary"):
+            if delete_email:
+                if delete_email.lower() == "dev@admin.local":
+                    st.error("Cannot delete the developer account.")
+                else:
+                    updated_users = edited_users[edited_users["Email"] != delete_email].reset_index(drop=True)
+                    write_sheet("Users", updated_users)
+                    refresh_passwords_cb()
+                    st.success(f"User '{delete_email}' deleted.")
+                    st.rerun()
 
     with tabs[1]:
         st.subheader("Trainer & Colors")

@@ -54,6 +54,12 @@ def new_event_tab(df, user_email, TRAINERS, TYPES, STATUSES, SOURCES, MEDIUMS, L
         submitted = st.form_submit_button("Save Event", use_container_width=True)
 
         if submitted:
+            if not client or not client.strip():
+                st.error("❌ Client is required!")
+                return df
+            if not course or not course.strip():
+                st.error("❌ Course / Description is required!")
+                return df
             if not trainer:
                 st.error("❌ Please select at least one trainer!")
                 return df
@@ -207,11 +213,17 @@ def manage_events_tab(df, user_email, TRAINERS, STATUSES, SOURCES, LOCATIONS, ME
                 edit_notes = st.text_area("Notes", value=selected_event["Notes"])
 
                 if st.form_submit_button("💾 Save Changes", use_container_width=True):
+                    if not edit_client or not edit_client.strip():
+                        st.error("❌ Client is required!")
+                        return df
+                    if not edit_course or not edit_course.strip():
+                        st.error("❌ Course / Description is required!")
+                        return df
                     if not edit_trainer:
-                        st.error("Select a trainer.")
+                        st.error("❌ Select a trainer.")
                         return df
                     if edit_end_date < edit_start_date:
-                        st.error("End date cannot be before start.")
+                        st.error("❌ End date cannot be before start.")
                         return df
 
                     df_drop = df.drop(selected_idx).reset_index(drop=True)
