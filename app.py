@@ -109,6 +109,8 @@ elif role == "view_only":
     df = viewer_page(df, user_email, {"TRAINERS": TRAINERS, "TRAINER_COLORS": TRAINER_COLORS})
 elif role == "trainer":
     trainer_name = get_trainer_name(users_df, user_email)
-    df = trainer_page(df, user_email, {"TRAINERS": TRAINERS, "TRAINER_COLORS": TRAINER_COLORS, "trainer_name": trainer_name})
+    # Only pass the trainer's own color - trainers should not see other trainers' information
+    trainer_color = TRAINER_COLORS.get(trainer_name, "#ccc")
+    df = trainer_page(df, user_email, {"trainer_name": trainer_name, "trainer_color": trainer_color})
 else:
     st.error("Unauthorized role.")

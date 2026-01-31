@@ -57,39 +57,54 @@ def settings_tab(users_df, trainers_df, lists_df, rules_df, defaults_df, notif_d
 
         # Existing Users Table
         st.markdown("#### Existing Users")
+        st.caption("Edit Role, TrainerName, or Active status directly in the table below. Use the Delete User section to remove users.")
         edited_users = st.data_editor(
             users_df,
             use_container_width=True,
-            num_rows="fixed",
+            num_rows="fixed",  # Prevent accidental row deletion via data editor
+            key="users_data_editor",
             column_config={
+                "Email": st.column_config.TextColumn("Email", disabled=True),  # Prevent email changes that could cause issues
                 "Role": st.column_config.SelectboxColumn("Role", options=["admin","view_only","trainer"]),
                 "Active": st.column_config.CheckboxColumn("Active"),
                 "Password": st.column_config.TextColumn("Password", disabled=True),
             }
         )
         if st.button("💾 Save Changes"):
-            edited_users["Email"] = edited_users["Email"].str.lower().str.strip()
-            write_sheet("Users", edited_users)
-            refresh_passwords_cb()
-            st.success("Users saved. App will refresh.")
-            st.rerun()
+            # Verify no rows were lost (safety check)
+            if len(edited_users) < len(users_df):
+                st.error("Error: Some users appear to be missing. Changes not saved. Please refresh the page.")
+            else:
+                edited_users["Email"] = users_df["Email"].str.lower().str.strip()  # Preserve original emails
+                write_sheet("Users", edited_users)
+                refresh_passwords_cb()
+                st.success("Users saved. App will refresh.")
+                st.rerun()
 
         st.divider()
 
         # Reset Password Section
         st.markdown("#### Reset User Password")
-        reset_email = st.selectbox("Select User", edited_users["Email"].tolist() if len(edited_users) else [])
+        # Use fresh data from file for user list to avoid stale state issues
+        current_users = read_sheet("Users", pd.DataFrame(columns=["Email","Role","TrainerName","Active","Password"]))
+        reset_email = st.selectbox("Select User", current_users["Email"].tolist() if len(current_users) else [])
         new_pw = st.text_input("New Password", type="password", key="reset_pw_input")
         if st.button("🔑 Reset Password"):
             if reset_email and new_pw:
                 if len(new_pw) < 6:
                     st.error("Password must be at least 6 characters.")
                 else:
-                    hashed_pw = hash_password(new_pw)
-                    edited_users.loc[edited_users["Email"]==reset_email, "Password"] = hashed_pw
-                    write_sheet("Users", edited_users)
-                    refresh_passwords_cb()
-                    st.success("Password reset.")
+                    # Reload fresh data before modifying to prevent race conditions
+                    fresh_users = read_sheet("Users", pd.DataFrame(columns=["Email","Role","TrainerName","Active","Password"]))
+                    if reset_email not in fresh_users["Email"].values:
+                        st.error("User not found. Please refresh the page.")
+                    else:
+                        hashed_pw = hash_password(new_pw)
+                        fresh_users.loc[fresh_users["Email"]==reset_email, "Password"] = hashed_pw
+                        write_sheet("Users", fresh_users)
+                        refresh_passwords_cb()
+                        st.success("Password reset.")
+                        st.rerun()
             else:
                 st.error("Pick user and password.")
 
@@ -97,17 +112,28 @@ def settings_tab(users_df, trainers_df, lists_df, rules_df, defaults_df, notif_d
 
         # Delete User Section
         st.markdown("#### Delete User")
-        delete_email = st.selectbox("Select User to Delete", edited_users["Email"].tolist() if len(edited_users) else [], key="delete_user_select")
-        if st.button("🗑️ Delete User", type="secondary"):
+        # Use fresh data from file for user list
+        delete_users_list = read_sheet("Users", pd.DataFrame(columns=["Email","Role","TrainerName","Active","Password"]))
+        delete_email = st.selectbox("Select User to Delete", delete_users_list["Email"].tolist() if len(delete_users_list) else [], key="delete_user_select")
+
+        # Confirmation checkbox to prevent accidental deletion
+        confirm_delete = st.checkbox(f"I confirm I want to permanently delete this user", key="confirm_delete_user")
+
+        if st.button("🗑️ Delete User", type="secondary", disabled=not confirm_delete):
             if delete_email:
                 if delete_email.lower() == "dev@admin.local":
                     st.error("Cannot delete the developer account.")
                 else:
-                    updated_users = edited_users[edited_users["Email"] != delete_email].reset_index(drop=True)
-                    write_sheet("Users", updated_users)
-                    refresh_passwords_cb()
-                    st.success(f"User '{delete_email}' deleted.")
-                    st.rerun()
+                    # Reload fresh data before deleting
+                    fresh_users = read_sheet("Users", pd.DataFrame(columns=["Email","Role","TrainerName","Active","Password"]))
+                    if delete_email not in fresh_users["Email"].values:
+                        st.error("User not found. They may have already been deleted.")
+                    else:
+                        updated_users = fresh_users[fresh_users["Email"] != delete_email].reset_index(drop=True)
+                        write_sheet("Users", updated_users)
+                        refresh_passwords_cb()
+                        st.success(f"User '{delete_email}' deleted.")
+                        st.rerun()
 
     with tabs[1]:
         st.subheader("Trainer & Colors")

