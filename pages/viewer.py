@@ -4,11 +4,30 @@ import pandas as pd
 from ui.calendar_grid import calendar_grid
 from ui.day_details import day_details_panel
 from ui.shared import trainer_legend
+from ui.event_forms import viewer_events_list_tab
 
 def viewer_page(df, user_email, settings):
-    TRAINERS, TRAINER_COLORS = settings["TRAINERS"], settings["TRAINER_COLORS"]
+    TRAINERS = settings["TRAINERS"]
+    TRAINER_COLORS = settings["TRAINER_COLORS"]
+    STATUSES = settings.get("STATUSES", [])
+    SOURCES = settings.get("SOURCES", [])
 
-    st.info("👁️ You have view-only access.")
+    st.info("👁️ You have view-only access. You can view all events but cannot make changes.")
+
+    # Create tabs for different views
+    tab1, tab2 = st.tabs(["📅 Calendar View", "📋 Events List"])
+
+    with tab1:
+        _render_calendar_tab(df, TRAINERS, TRAINER_COLORS)
+
+    with tab2:
+        viewer_events_list_tab(df, TRAINERS, STATUSES, SOURCES)
+
+    return df
+
+
+def _render_calendar_tab(df, TRAINERS, TRAINER_COLORS):
+    """Render the calendar view tab for viewers."""
     st.header("📅 Calendar View (Read Only)")
 
     col1, col2 = st.columns([1,3])
@@ -30,5 +49,4 @@ def viewer_page(df, user_email, settings):
 
     calendar_grid(month_events, selected_year, selected_month, TRAINERS, TRAINER_COLORS, role_prefix="viewer")
     st.divider()
-    df = day_details_panel(month_events, df, can_unmark=False, close_key="viewer_close_day")
-    return df
+    day_details_panel(month_events, df, can_unmark=False, close_key="viewer_close_day")

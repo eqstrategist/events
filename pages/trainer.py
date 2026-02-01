@@ -3,13 +3,31 @@ from datetime import datetime
 import pandas as pd
 import calendar
 from core.utils import trainer_matches, get_events_for_day, marked_for_includes
+from ui.event_forms import trainer_events_list_tab
 
 def trainer_page(df, user_email, settings):
     # Trainers should only see their own information
     trainer_name = settings["trainer_name"]
     trainer_color = settings.get("trainer_color", "#ccc")  # Only their own color
+    STATUSES = settings.get("STATUSES", [])
+    SOURCES = settings.get("SOURCES", [])
 
-    st.info(f"🎓 Welcome {trainer_name}! This is your personal calendar.")
+    st.info(f"🎓 Welcome {trainer_name}! This is your Event List.")
+
+    # Create tabs for different views
+    tab1, tab2 = st.tabs(["📅 Calendar View", "📋 My Events List"])
+
+    with tab1:
+        _render_calendar_tab(df, trainer_name, trainer_color)
+
+    with tab2:
+        trainer_events_list_tab(df, trainer_name, STATUSES, SOURCES)
+
+    return df
+
+
+def _render_calendar_tab(df, trainer_name, trainer_color):
+    """Render the calendar view tab for trainers."""
     st.header("📅 My Calendar")
 
     trainer_events = df[trainer_matches(df["Trainer Calendar"], trainer_name)]
@@ -121,5 +139,3 @@ def trainer_page(df, user_email, settings):
         if st.button("❌ Close Day Details", key="trainer_close_day"):
             st.session_state["selected_day"]=None
             st.rerun()
-
-    return df

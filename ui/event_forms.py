@@ -442,3 +442,308 @@ def manage_events_tab(df, user_email, TRAINERS, STATUSES, SOURCES, LOCATIONS, ME
                 st.rerun()
 
     return df
+
+
+def trainer_events_list_tab(df, trainer_name, STATUSES, SOURCES):
+    """View-only events list for trainers - allows filtering and downloading their own events."""
+    st.header("📋 My Events List")
+    st.info("View and filter all your assigned events. Use the download button to export your events.")
+
+    # Filters
+    st.subheader("🔍 Filter Events")
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        use_date_range = st.checkbox("Filter by Date Range", value=False, key="trainer_date_filter")
+        if use_date_range:
+            date_from = st.date_input("From Date", key="trainer_date_from")
+            date_to = st.date_input("To Date", key="trainer_date_to")
+
+    with col2:
+        status_filter = st.selectbox("Status", ["All"] + STATUSES, key="trainer_status_filter")
+
+    with col3:
+        source_filter = st.selectbox("Source", ["All"] + SOURCES, key="trainer_source_filter")
+
+    with col4:
+        client_search = st.text_input("Client Search", key="trainer_client_search")
+
+    # Filter the trainer's events
+    from core.utils import trainer_matches, marked_for_includes
+
+    # Get only this trainer's events
+    trainer_events = df[trainer_matches(df["Trainer Calendar"], trainer_name)]
+    marked_events = df[
+        (df["Is Marked"] == True) &
+        (df["Marked For"].apply(lambda x: marked_for_includes(x, trainer_name)))
+    ]
+    result = pd.concat([trainer_events, marked_events], ignore_index=True).drop_duplicates()
+
+    # Apply filters
+    if use_date_range:
+        if date_to < date_from:
+            st.warning("⚠️ 'To Date' cannot be before 'From Date'")
+        else:
+            result = result[
+                (pd.to_datetime(result["Date"]).dt.date >= date_from) &
+                (pd.to_datetime(result["Date"]).dt.date <= date_to)
+            ]
+
+    if status_filter != "All":
+        result = result[result["Status"] == status_filter]
+    if source_filter != "All":
+        result = result[result["Source"] == source_filter]
+    if client_search:
+        result = result[result["Client"].str.contains(client_search, case=False, na=False)]
+
+    # Sort by date
+    result = result.sort_values("Date", ascending=True)
+
+    st.divider()
+    st.write(f"**Showing {len(result)} event(s)**")
+
+    if len(result) == 0:
+        st.info("No events found matching your filters.")
+        return
+
+    # Summary statistics
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total Events", len(result[result["Is Marked"] != True]))
+    with col2:
+        st.metric("Blocked Dates", len(result[result["Is Marked"] == True]))
+    with col3:
+        if len(result) > 0:
+            date_range = f"{result['Date'].min().strftime('%Y-%m-%d')} to {result['Date'].max().strftime('%Y-%m-%d')}"
+            st.metric("Date Range", date_range)
+
+    st.divider()
+
+    # Display events in expandable cards
+    st.subheader("📅 Event Details")
+
+    normal_events = result[result["Is Marked"] != True]
+    blocked_events = result[result["Is Marked"] == True]
+
+    # Show blocked dates first
+    if len(blocked_events) > 0:
+        st.markdown("#### 🚫 Blocked Dates")
+        for _, ev in blocked_events.iterrows():
+            date_str = pd.to_datetime(ev["Date"]).strftime("%a, %d %b %Y")
+            with st.expander(f"🚫 {date_str} - BLOCKED"):
+                st.error("This date is blocked for you.")
+                st.write(f"**Reason:** {ev.get('Course/Description', 'No reason provided')}")
+                st.write(f"**Blocked For:** {ev.get('Marked For', 'All')}")
+
+    # Show normal events
+    if len(normal_events) > 0:
+        st.markdown("#### 📅 Scheduled Events")
+        for _, ev in normal_events.iterrows():
+            date_str = pd.to_datetime(ev["Date"]).strftime("%a, %d %b %Y")
+            title = ev.get("Title", "Untitled Event")
+            with st.expander(f"📅 {date_str} - {title}"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"**Type:** {ev.get('Type', '')}")
+                    st.write(f"**Status:** {ev.get('Status', '')}")
+                    st.write(f"**Source:** {ev.get('Source', '')}")
+                    st.write(f"**Client:** {ev.get('Client', '')}")
+                with col2:
+                    st.write(f"**Medium:** {ev.get('Medium', '')}")
+                    st.write(f"**Location:** {ev.get('Location', '')}")
+                    st.write(f"**Course/Description:** {ev.get('Course/Description', '')}")
+
+                if ev.get('Notes'):
+                    st.write(f"**Notes:** {ev.get('Notes', '')}")
+
+    st.divider()
+
+    # Data table view
+    st.subheader("📊 Table View")
+
+    # Select columns to display (exclude internal columns)
+    display_columns = ["Date", "Title", "Type", "Status", "Source", "Client",
+                       "Course/Description", "Medium", "Location"]
+    display_df = result[[c for c in display_columns if c in result.columns]].copy()
+    display_df["Date"] = pd.to_datetime(display_df["Date"]).dt.strftime("%Y-%m-%d")
+    display_df.index = range(1, len(display_df) + 1)
+
+    st.dataframe(display_df, use_container_width=True)
+
+    # Download button
+    st.divider()
+    st.subheader("⬇️ Download")
+
+    # Prepare download data (exclude sensitive columns)
+    download_columns = ["Date", "Title", "Type", "Status", "Source", "Client",
+                        "Course/Description", "Medium", "Location", "Notes"]
+    download_df = result[[c for c in download_columns if c in result.columns]].copy()
+
+    towrite = BytesIO()
+    download_df.to_excel(towrite, index=False, engine="openpyxl")
+    towrite.seek(0)
+
+    st.download_button(
+        "⬇️ Download My Events (Excel)",
+        data=towrite,
+        file_name=f"My_Events_{trainer_name}_{datetime.now().strftime('%Y%m%d')}.xlsx",
+        mime="application/vnd.ms-excel",
+        use_container_width=True
+    )
+
+
+def viewer_events_list_tab(df, TRAINERS, STATUSES, SOURCES):
+    """View-only events list for viewers - can see all trainers' events but cannot edit."""
+    st.header("📋 All Events List")
+    st.info("View and filter all events. This is a read-only view.")
+
+    # Filters
+    st.subheader("🔍 Filter Events")
+    col1, col2, col3, col4, col5 = st.columns(5)
+
+    with col1:
+        use_date_range = st.checkbox("Filter by Date Range", value=False, key="viewer_date_filter")
+        if use_date_range:
+            date_from = st.date_input("From Date", key="viewer_date_from")
+            date_to = st.date_input("To Date", key="viewer_date_to")
+
+    with col2:
+        trainer_filter = st.selectbox("Trainer", ["All"] + TRAINERS, key="viewer_trainer_filter")
+
+    with col3:
+        status_filter = st.selectbox("Status", ["All"] + STATUSES, key="viewer_status_filter")
+
+    with col4:
+        source_filter = st.selectbox("Source", ["All"] + SOURCES, key="viewer_source_filter")
+
+    with col5:
+        client_search = st.text_input("Client Search", key="viewer_client_search")
+
+    # Start with all events (excluding marked/blocked)
+    result = df.copy()
+
+    # Apply filters
+    if use_date_range:
+        if date_to < date_from:
+            st.warning("⚠️ 'To Date' cannot be before 'From Date'")
+        else:
+            result = result[
+                (pd.to_datetime(result["Date"]).dt.date >= date_from) &
+                (pd.to_datetime(result["Date"]).dt.date <= date_to)
+            ]
+
+    if trainer_filter != "All":
+        result = result[trainer_matches(result["Trainer Calendar"], trainer_filter)]
+    if status_filter != "All":
+        result = result[result["Status"] == status_filter]
+    if source_filter != "All":
+        result = result[result["Source"] == source_filter]
+    if client_search:
+        result = result[result["Client"].str.contains(client_search, case=False, na=False)]
+
+    # Sort by date
+    result = result.sort_values("Date", ascending=True)
+
+    st.divider()
+    st.write(f"**Showing {len(result)} event(s)**")
+
+    if len(result) == 0:
+        st.info("No events found matching your filters.")
+        return
+
+    # Summary statistics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        normal_count = len(result[result["Is Marked"] != True])
+        st.metric("Total Events", normal_count)
+    with col2:
+        blocked_count = len(result[result["Is Marked"] == True])
+        st.metric("Blocked Dates", blocked_count)
+    with col3:
+        unique_trainers = set()
+        for trainers in result["Trainer Calendar"].dropna():
+            for t in str(trainers).split(","):
+                t = t.strip()
+                if t:
+                    unique_trainers.add(t)
+        st.metric("Trainers", len(unique_trainers))
+    with col4:
+        if len(result) > 0:
+            date_range = f"{result['Date'].min().strftime('%Y-%m-%d')} to {result['Date'].max().strftime('%Y-%m-%d')}"
+            st.metric("Date Range", date_range)
+
+    st.divider()
+
+    # Display events in expandable cards
+    st.subheader("📅 Event Details")
+
+    normal_events = result[result["Is Marked"] != True]
+    blocked_events = result[result["Is Marked"] == True]
+
+    # Show blocked dates
+    if len(blocked_events) > 0:
+        st.markdown("#### 🚫 Blocked Dates")
+        for _, ev in blocked_events.iterrows():
+            date_str = pd.to_datetime(ev["Date"]).strftime("%a, %d %b %Y")
+            blocked_for = ev.get('Marked For', 'All')
+            with st.expander(f"🚫 {date_str} - BLOCKED ({blocked_for})"):
+                st.error(f"Blocked for: {blocked_for}")
+                st.write(f"**Reason:** {ev.get('Course/Description', 'No reason provided')}")
+
+    # Show normal events
+    if len(normal_events) > 0:
+        st.markdown("#### 📅 Scheduled Events")
+        for _, ev in normal_events.iterrows():
+            date_str = pd.to_datetime(ev["Date"]).strftime("%a, %d %b %Y")
+            title = ev.get("Title", "Untitled Event")
+            trainer = ev.get("Trainer Calendar", "")
+            with st.expander(f"📅 {date_str} - {title}"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"**Trainer:** {trainer}")
+                    st.write(f"**Type:** {ev.get('Type', '')}")
+                    st.write(f"**Status:** {ev.get('Status', '')}")
+                    st.write(f"**Source:** {ev.get('Source', '')}")
+                with col2:
+                    st.write(f"**Client:** {ev.get('Client', '')}")
+                    st.write(f"**Medium:** {ev.get('Medium', '')}")
+                    st.write(f"**Location:** {ev.get('Location', '')}")
+                    st.write(f"**Course/Description:** {ev.get('Course/Description', '')}")
+
+                if ev.get('Notes'):
+                    st.write(f"**Notes:** {ev.get('Notes', '')}")
+
+    st.divider()
+
+    # Data table view
+    st.subheader("📊 Table View")
+
+    # Select columns to display
+    display_columns = ["Date", "Title", "Trainer Calendar", "Type", "Status", "Source", "Client",
+                       "Course/Description", "Medium", "Location"]
+    display_df = result[[c for c in display_columns if c in result.columns]].copy()
+    display_df["Date"] = pd.to_datetime(display_df["Date"]).dt.strftime("%Y-%m-%d")
+    display_df.index = range(1, len(display_df) + 1)
+
+    st.dataframe(display_df, use_container_width=True)
+
+    # Download button
+    st.divider()
+    st.subheader("⬇️ Download")
+
+    # Prepare download data
+    download_columns = ["Date", "Title", "Trainer Calendar", "Type", "Status", "Source", "Client",
+                        "Course/Description", "Medium", "Location", "Notes"]
+    download_df = result[[c for c in download_columns if c in result.columns]].copy()
+
+    towrite = BytesIO()
+    download_df.to_excel(towrite, index=False, engine="openpyxl")
+    towrite.seek(0)
+
+    st.download_button(
+        "⬇️ Download Events (Excel)",
+        data=towrite,
+        file_name=f"Events_Export_{datetime.now().strftime('%Y%m%d')}.xlsx",
+        mime="application/vnd.ms-excel",
+        use_container_width=True
+    )

@@ -106,11 +106,28 @@ if role == "admin":
     )
     df = admin_page(df, user_email, settings_tuple)
 elif role == "view_only":
-    df = viewer_page(df, user_email, {"TRAINERS": TRAINERS, "TRAINER_COLORS": TRAINER_COLORS})
+    # Pass statuses and sources without "All" prefix (the filter adds it)
+    viewer_statuses = [s for s in STATUSES if s != "All"]
+    viewer_sources = [s for s in SOURCES if s != "All"]
+    df = viewer_page(df, user_email, {
+        "TRAINERS": TRAINERS,
+        "TRAINER_COLORS": TRAINER_COLORS,
+        "STATUSES": viewer_statuses,
+        "SOURCES": viewer_sources
+    })
 elif role == "trainer":
     trainer_name = get_trainer_name(users_df, user_email)
-    # Only pass the trainer's own color - trainers should not see other trainers' information
+    # Only pass the trainer's own color and necessary filter options
+    # Trainers should not see other trainers' information
     trainer_color = TRAINER_COLORS.get(trainer_name, "#ccc")
-    df = trainer_page(df, user_email, {"trainer_name": trainer_name, "trainer_color": trainer_color})
+    # Pass statuses and sources without "All" prefix (the filter adds it)
+    trainer_statuses = [s for s in STATUSES if s != "All"]
+    trainer_sources = [s for s in SOURCES if s != "All"]
+    df = trainer_page(df, user_email, {
+        "trainer_name": trainer_name,
+        "trainer_color": trainer_color,
+        "STATUSES": trainer_statuses,
+        "SOURCES": trainer_sources
+    })
 else:
     st.error("Unauthorized role.")
