@@ -2,7 +2,7 @@ import os, time, shutil, logging
 import pandas as pd
 from datetime import datetime
 from openpyxl import load_workbook
-from .config import EXCEL_FILE, EVENTS_SHEET, SHEETS
+from .config import EXCEL_FILE, EVENTS_SHEET, SHEETS, DEFAULT_AUDIT_RETENTION_DAYS, AUDIT_ARCHIVE_DIR
 from .security import hash_password, is_password_hashed
 import fcntl
 
@@ -86,6 +86,69 @@ def append_audit(user, action, details=""):
         "Details": details
     }
     write_sheet("Audit", audit_df)
+
+def get_audit_retention_days():
+    """Read the configured audit retention period from the Rules sheet."""
+    rules_df = read_sheet("Rules", pd.DataFrame(columns=["Key", "Value"]))
+    row = rules_df[rules_df["Key"] == "audit_retention_days"]
+    if len(row) > 0:
+        try:
+            return max(int(row.iloc[0]["Value"]), 30)  # minimum 30 days
+        except (ValueError, TypeError):
+            pass
+    return DEFAULT_AUDIT_RETENTION_DAYS
+
+def archive_old_audit_entries():
+    """Archive and remove audit entries older than the retention period.
+
+    Old entries are saved to a CSV file in AUDIT_ARCHIVE_DIR before removal.
+    Returns (archived_count, archive_file) or (0, None) if nothing to archive.
+    """
+    retention_days = get_audit_retention_days()
+    audit_df = read_sheet("Audit", pd.DataFrame(columns=["Timestamp", "User", "Action", "Details"]))
+    if len(audit_df) == 0:
+        return 0, None
+
+    audit_df["_parsed_ts"] = pd.to_datetime(audit_df["Timestamp"], errors="coerce")
+    cutoff = datetime.now() - pd.Timedelta(days=retention_days)
+    old_entries = audit_df[audit_df["_parsed_ts"] < cutoff].drop(columns=["_parsed_ts"])
+    recent_entries = audit_df[audit_df["_parsed_ts"] >= cutoff].drop(columns=["_parsed_ts"])
+    # Keep entries with unparseable timestamps (don't silently discard)
+    unparseable = audit_df[audit_df["_parsed_ts"].isna()].drop(columns=["_parsed_ts"])
+    recent_entries = pd.concat([recent_entries, unparseable], ignore_index=True)
+
+    if len(old_entries) == 0:
+        return 0, None
+
+    # Archive old entries to CSV
+    if not os.path.exists(AUDIT_ARCHIVE_DIR):
+        os.makedirs(AUDIT_ARCHIVE_DIR)
+    archive_filename = f"audit_archive_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    archive_path = os.path.join(AUDIT_ARCHIVE_DIR, archive_filename)
+    old_entries.to_csv(archive_path, index=False)
+
+    # Write back only recent entries
+    write_sheet("Audit", recent_entries.reset_index(drop=True))
+    logging.info(f"Archived {len(old_entries)} audit entries older than {retention_days} days to {archive_filename}")
+    return len(old_entries), archive_filename
+
+def list_audit_archives():
+    """List available audit archive files."""
+    if not os.path.exists(AUDIT_ARCHIVE_DIR):
+        return []
+    archives = []
+    for filename in sorted(os.listdir(AUDIT_ARCHIVE_DIR), reverse=True):
+        if filename.endswith(".csv") and filename.startswith("audit_archive_"):
+            filepath = os.path.join(AUDIT_ARCHIVE_DIR, filename)
+            size_kb = os.path.getsize(filepath) / 1024
+            modified_time = os.path.getmtime(filepath)
+            archives.append({
+                "filename": filename,
+                "filepath": filepath,
+                "created": datetime.fromtimestamp(modified_time).strftime("%Y-%m-%d %H:%M:%S"),
+                "size_kb": round(size_kb, 1),
+            })
+    return archives
 
 def migrate_plaintext_passwords():
     """Migrate any existing plaintext passwords to hashed passwords."""

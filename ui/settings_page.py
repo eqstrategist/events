@@ -1,6 +1,10 @@
 import streamlit as st
 import pandas as pd
-from core.storage import read_sheet, write_sheet, create_backup, list_backups, delete_backup, restore_backup, import_backup
+from core.storage import (
+    read_sheet, write_sheet, create_backup, list_backups, delete_backup,
+    restore_backup, import_backup, get_audit_retention_days, archive_old_audit_entries,
+    list_audit_archives,
+)
 from core.config import LIST_CATEGORIES
 from core.security import hash_password
 
@@ -130,19 +134,16 @@ def settings_tab(users_df, trainers_df, lists_df, rules_df, defaults_df, notif_d
 
         if st.button("🗑️ Delete User", type="secondary", disabled=not confirm_delete):
             if delete_email:
-                if delete_email.lower() == "dev@admin.local":
-                    st.error("Cannot delete the developer account.")
+                # Reload fresh data before deleting
+                fresh_users = read_sheet("Users", pd.DataFrame(columns=["Email","Role","TrainerName","Active","Password"]))
+                if delete_email not in fresh_users["Email"].values:
+                    st.error("User not found. They may have already been deleted.")
                 else:
-                    # Reload fresh data before deleting
-                    fresh_users = read_sheet("Users", pd.DataFrame(columns=["Email","Role","TrainerName","Active","Password"]))
-                    if delete_email not in fresh_users["Email"].values:
-                        st.error("User not found. They may have already been deleted.")
-                    else:
-                        updated_users = fresh_users[fresh_users["Email"] != delete_email].reset_index(drop=True)
-                        write_sheet("Users", updated_users)
-                        refresh_passwords_cb()
-                        st.success(f"User '{delete_email}' deleted.")
-                        st.rerun()
+                    updated_users = fresh_users[fresh_users["Email"] != delete_email].reset_index(drop=True)
+                    write_sheet("Users", updated_users)
+                    refresh_passwords_cb()
+                    st.success(f"User '{delete_email}' deleted.")
+                    st.rerun()
 
     with tabs[1]:
         st.subheader("Trainer & Colors")
@@ -330,5 +331,71 @@ def settings_tab(users_df, trainers_df, lists_df, rules_df, defaults_df, notif_d
 
     with tabs[7]:
         st.subheader("Audit Log")
+
+        # Retention settings
+        st.markdown("#### Retention Policy")
+        current_retention = get_audit_retention_days()
+        rules_df_fresh = read_sheet("Rules", pd.DataFrame(columns=["Key", "Value"]))
+        retention_options = [90, 180, 365, 730, 1095]
+        retention_labels = ["90 days", "180 days", "1 year", "2 years", "3 years"]
+        current_idx = retention_options.index(current_retention) if current_retention in retention_options else 2
+        new_retention = st.selectbox(
+            "Keep audit logs for",
+            options=retention_options,
+            format_func=lambda x: retention_labels[retention_options.index(x)],
+            index=current_idx,
+            key="audit_retention_select",
+        )
+        col_save, col_archive = st.columns(2)
+        with col_save:
+            if st.button("💾 Save Retention Setting"):
+                existing = rules_df_fresh[rules_df_fresh["Key"] == "audit_retention_days"]
+                if len(existing) > 0:
+                    rules_df_fresh.loc[rules_df_fresh["Key"] == "audit_retention_days", "Value"] = new_retention
+                else:
+                    rules_df_fresh = pd.concat([
+                        rules_df_fresh,
+                        pd.DataFrame([{"Key": "audit_retention_days", "Value": new_retention}])
+                    ], ignore_index=True)
+                write_sheet("Rules", rules_df_fresh)
+                st.success(f"Retention set to {retention_labels[retention_options.index(new_retention)]}.")
+                st.rerun()
+        with col_archive:
+            if st.button("🗄️ Archive Old Entries Now"):
+                count, archive_file = archive_old_audit_entries()
+                if count > 0:
+                    st.success(f"Archived {count} old entries to {archive_file}.")
+                    st.rerun()
+                else:
+                    st.info("No entries older than the retention period to archive.")
+
+        st.divider()
+
+        # Current audit log
+        st.markdown("#### Current Entries")
         audit_df = read_sheet("Audit", pd.DataFrame(columns=["Timestamp","User","Action","Details"]))
+        st.caption(f"{len(audit_df)} entries (retention: {retention_labels[retention_options.index(current_retention)] if current_retention in retention_options else str(current_retention) + ' days'})")
         st.dataframe(audit_df.sort_values("Timestamp", ascending=False), use_container_width=True)
+
+        st.divider()
+
+        # Archived logs
+        st.markdown("#### Archived Logs")
+        archives = list_audit_archives()
+        if not archives:
+            st.info("No archived audit logs yet. Old entries will be archived when you run 'Archive Old Entries Now' or on app startup.")
+        else:
+            for archive in archives:
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    st.text(archive["filename"])
+                    st.caption(f"Created: {archive['created']} | Size: {archive['size_kb']} KB")
+                with col2:
+                    with open(archive["filepath"], "rb") as f:
+                        st.download_button(
+                            "Download",
+                            f,
+                            file_name=archive["filename"],
+                            mime="text/csv",
+                            key=f"dl_audit_{archive['filename']}",
+                        )

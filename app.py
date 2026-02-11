@@ -1,7 +1,7 @@
 import streamlit as st
 from core.state import init_state
 from core.logging_config import setup_logging
-from core.storage import load_settings, load_events
+from core.storage import load_settings, load_events, archive_old_audit_entries
 from core.auth import ensure_login, get_current_user_role, get_trainer_name, refresh_session_passwords
 from pages.admin import admin_page
 from pages.viewer import viewer_page
@@ -43,6 +43,14 @@ st.markdown(
 init_state()
 
 users_df, trainers_df, lists_df, rules_df, defaults_df, notif_df = load_settings()
+
+# Auto-archive audit entries beyond retention period (runs once per session)
+if not st.session_state.get("_audit_cleanup_done"):
+    try:
+        archive_old_audit_entries()
+    except Exception:
+        pass  # don't block app startup
+    st.session_state["_audit_cleanup_done"] = True
 
 AUTHORIZED_EMAILS = users_df[users_df["Active"]==True]["Email"].str.lower().tolist()
 
