@@ -59,14 +59,16 @@ def settings_tab(users_df, trainers_df, lists_df, rules_df, defaults_df, notif_d
         st.markdown("#### Existing Users")
         st.caption("Edit Role, TrainerName, or Active status directly in the table below. Use the Delete User section to remove users.")
         display_users = users_df.copy()
-        display_users.index = range(1, len(display_users) + 1)
+        display_users.insert(0, "#", range(1, len(display_users) + 1))
         edited_users = st.data_editor(
             display_users,
             use_container_width=True,
+            hide_index=True,
             num_rows="fixed",  # Prevent accidental row deletion via data editor
             key="users_data_editor",
             column_config={
-                "Email": st.column_config.TextColumn("Email", disabled=True),  # Prevent email changes that could cause issues
+                "#": st.column_config.NumberColumn("#", disabled=True),
+                "Email": st.column_config.TextColumn("Email", disabled=True),
                 "Role": st.column_config.SelectboxColumn("Role", options=["admin","view_only","trainer"]),
                 "Active": st.column_config.CheckboxColumn("Active"),
                 "Password": st.column_config.TextColumn("Password", disabled=True),
@@ -77,8 +79,8 @@ def settings_tab(users_df, trainers_df, lists_df, rules_df, defaults_df, notif_d
             if len(edited_users) != len(users_df):
                 st.error("Error: Row count mismatch. Changes not saved. Please refresh the page.")
             else:
-                # Reset index back to 0-based before saving
-                save_users = edited_users.reset_index(drop=True)
+                # Drop the display-only '#' column and reset index before saving
+                save_users = edited_users.drop(columns=["#"], errors="ignore").reset_index(drop=True)
                 # Preserve original emails (lowercase/stripped) - use .values to ensure alignment by position
                 save_users["Email"] = users_df["Email"].str.lower().str.strip().values
                 # Preserve original passwords (not editable via data editor)
