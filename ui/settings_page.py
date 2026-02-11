@@ -58,8 +58,10 @@ def settings_tab(users_df, trainers_df, lists_df, rules_df, defaults_df, notif_d
         # Existing Users Table
         st.markdown("#### Existing Users")
         st.caption("Edit Role, TrainerName, or Active status directly in the table below. Use the Delete User section to remove users.")
+        display_users = users_df.copy()
+        display_users.index = range(1, len(display_users) + 1)
         edited_users = st.data_editor(
-            users_df,
+            display_users,
             use_container_width=True,
             num_rows="fixed",  # Prevent accidental row deletion via data editor
             key="users_data_editor",
@@ -75,11 +77,13 @@ def settings_tab(users_df, trainers_df, lists_df, rules_df, defaults_df, notif_d
             if len(edited_users) != len(users_df):
                 st.error("Error: Row count mismatch. Changes not saved. Please refresh the page.")
             else:
+                # Reset index back to 0-based before saving
+                save_users = edited_users.reset_index(drop=True)
                 # Preserve original emails (lowercase/stripped) - use .values to ensure alignment by position
-                edited_users["Email"] = users_df["Email"].str.lower().str.strip().values
+                save_users["Email"] = users_df["Email"].str.lower().str.strip().values
                 # Preserve original passwords (not editable via data editor)
-                edited_users["Password"] = users_df["Password"].values
-                write_sheet("Users", edited_users)
+                save_users["Password"] = users_df["Password"].values
+                write_sheet("Users", save_users)
                 refresh_passwords_cb()
                 st.success("Users saved. App will refresh.")
                 st.rerun()
