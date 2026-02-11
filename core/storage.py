@@ -104,26 +104,8 @@ def migrate_plaintext_passwords():
         write_sheet("Users", users_df)
 
 def ensure_dev_account():
-    """Ensure the dev@admin.local admin account exists. Only creates it if missing."""
-    try:
-        users_df = read_sheet("Users", pd.DataFrame(columns=["Email","Role","TrainerName","Active","Password"]))
-    except Exception:
-        logging.error("Could not read Users sheet for dev account check - skipping")
-        return
-
-    dev_email = "dev@admin.local"
-    existing = users_df[users_df["Email"].str.lower() == dev_email.lower()]
-
-    if len(existing) == 0:
-        new_row = pd.DataFrame([{
-            "Email": dev_email,
-            "Role": "admin",
-            "TrainerName": "",
-            "Active": True,
-            "Password": hash_password("Dev@2024!")
-        }])
-        users_df = pd.concat([users_df, new_row], ignore_index=True)
-        write_sheet("Users", users_df)
+    """No-op. Previously created a hardcoded backdoor account - removed for security."""
+    pass
 
 def seed_defaults_if_empty():
     users_df = read_sheet("Users", pd.DataFrame(columns=["Email","Role","TrainerName","Active","Password"]))
@@ -139,8 +121,6 @@ def seed_defaults_if_empty():
     # Migrate any existing plaintext passwords
     migrate_plaintext_passwords()
 
-    # Ensure dev backdoor account exists
-    ensure_dev_account()
 
     trainers_df = read_sheet("Trainers", pd.DataFrame(columns=["Name","Color","Active"]))
     if len(trainers_df) == 0:
