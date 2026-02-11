@@ -5,10 +5,10 @@ from .utils import marked_for_includes
 from datetime import datetime
 
 def is_date_blocked_for_trainer(df_all, date_obj, trainer):
-    # Check if "Is Marked" column exists, default to False if not
-    is_marked = df_all["Is Marked"] if "Is Marked" in df_all.columns else False
+    if "Is Marked" not in df_all.columns or len(df_all) == 0:
+        return False
     marks = df_all[
-        (is_marked == True) &
+        (df_all["Is Marked"] == True) &
         (pd.to_datetime(df_all["Date"]).dt.date == date_obj)
     ]
     for _, m in marks.iterrows():
@@ -17,10 +17,12 @@ def is_date_blocked_for_trainer(df_all, date_obj, trainer):
     return False
 
 def render_mixed_calendar_cell(day, day_events, TRAINERS, TRAINER_COLORS):
-    # Check if "Is Marked" column exists, default to False if not
-    is_marked = day_events["Is Marked"] if "Is Marked" in day_events.columns else False
-    marked_event = day_events[is_marked == True]
-    normal_events = day_events[is_marked != True]
+    if "Is Marked" not in day_events.columns:
+        marked_event = day_events.iloc[0:0]  # empty DataFrame with same columns
+        normal_events = day_events
+    else:
+        marked_event = day_events[day_events["Is Marked"] == True]
+        normal_events = day_events[day_events["Is Marked"] != True]
 
     badges = []
     if len(marked_event):

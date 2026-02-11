@@ -72,10 +72,13 @@ def settings_tab(users_df, trainers_df, lists_df, rules_df, defaults_df, notif_d
         )
         if st.button("💾 Save Changes"):
             # Verify no rows were lost (safety check)
-            if len(edited_users) < len(users_df):
-                st.error("Error: Some users appear to be missing. Changes not saved. Please refresh the page.")
+            if len(edited_users) != len(users_df):
+                st.error("Error: Row count mismatch. Changes not saved. Please refresh the page.")
             else:
-                edited_users["Email"] = users_df["Email"].str.lower().str.strip()  # Preserve original emails
+                # Preserve original emails (lowercase/stripped) - use .values to ensure alignment by position
+                edited_users["Email"] = users_df["Email"].str.lower().str.strip().values
+                # Preserve original passwords (not editable via data editor)
+                edited_users["Password"] = users_df["Password"].values
                 write_sheet("Users", edited_users)
                 refresh_passwords_cb()
                 st.success("Users saved. App will refresh.")
@@ -278,11 +281,11 @@ def settings_tab(users_df, trainers_df, lists_df, rules_df, defaults_df, notif_d
         st.subheader("Defaults")
         defaults_map = {d["Key"]: d["Value"] for _, d in defaults_df.iterrows()}
 
-        STATUSES = lists_df[(lists_df["Category"]=="Statuses") & (lists_df["Active"]==True)]["Value"].tolist()
-        MEDIUMS = lists_df[(lists_df["Category"]=="Mediums") & (lists_df["Active"]==True)]["Value"].tolist()
-        SOURCES = lists_df[(lists_df["Category"]=="Sources") & (lists_df["Active"]==True)]["Value"].tolist()
-        LOCATIONS = lists_df[(lists_df["Category"]=="Locations") & (lists_df["Active"]==True)]["Value"].tolist()
-        TYPES = lists_df[(lists_df["Category"]=="Types") & (lists_df["Active"]==True)]["Value"].tolist()
+        STATUSES = lists_df[(lists_df["Category"]=="Statuses") & (lists_df["Active"]==True)]["Value"].tolist() or ["Offered"]
+        MEDIUMS = lists_df[(lists_df["Category"]=="Mediums") & (lists_df["Active"]==True)]["Value"].tolist() or ["Online"]
+        SOURCES = lists_df[(lists_df["Category"]=="Sources") & (lists_df["Active"]==True)]["Value"].tolist() or ["EQS"]
+        LOCATIONS = lists_df[(lists_df["Category"]=="Locations") & (lists_df["Active"]==True)]["Value"].tolist() or ["Global"]
+        TYPES = lists_df[(lists_df["Category"]=="Types") & (lists_df["Active"]==True)]["Value"].tolist() or ["W"]
 
         new_default_status = st.selectbox("Default Status", STATUSES, index=STATUSES.index(defaults_map.get("default_status","Offered")) if defaults_map.get("default_status","Offered") in STATUSES else 0)
         new_default_medium = st.selectbox("Default Medium", MEDIUMS, index=MEDIUMS.index(defaults_map.get("default_medium","Online")) if defaults_map.get("default_medium","Online") in MEDIUMS else 0)

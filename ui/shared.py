@@ -2,6 +2,9 @@ import streamlit as st
 
 def trainer_legend(TRAINERS, TRAINER_COLORS):
     st.subheader("Trainer Color Legend")
+    if not TRAINERS:
+        st.caption("No active trainers configured.")
+        return
     legend_cols = st.columns(len(TRAINERS))
     for i, t in enumerate(TRAINERS):
         with legend_cols[i]:

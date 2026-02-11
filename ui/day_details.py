@@ -13,8 +13,12 @@ def day_details_panel(month_events, df, can_unmark=False, close_key="close_day")
     if len(day_all) == 0:
         st.info("No events on this day.")
     else:
-        blocked_today = day_all[day_all.get("Is Marked", False) == True]
-        normal_today  = day_all[day_all.get("Is Marked", False) != True]
+        if "Is Marked" in day_all.columns:
+            blocked_today = day_all[day_all["Is Marked"] == True]
+            normal_today  = day_all[day_all["Is Marked"] != True]
+        else:
+            blocked_today = day_all.iloc[0:0]
+            normal_today  = day_all
 
         if len(blocked_today):
             for idx, ev in blocked_today.iterrows():

@@ -1,9 +1,9 @@
-import os, time, shutil
+import os, time, shutil, logging
 import pandas as pd
 from datetime import datetime
 from openpyxl import load_workbook
 from .config import EXCEL_FILE, EVENTS_SHEET, SHEETS
-from .security import hash_password
+from .security import hash_password, is_password_hashed
 import fcntl
 
 BACKUP_DIR = "backups"
@@ -30,8 +30,10 @@ def ensure_workbook():
 def sheet_exists(sheet_name):
     if not os.path.exists(EXCEL_FILE):
         return False
-    wb = load_workbook(EXCEL_FILE)
-    return sheet_name in wb.sheetnames
+    wb = load_workbook(EXCEL_FILE, read_only=True)
+    result = sheet_name in wb.sheetnames
+    wb.close()
+    return result
 
 def read_sheet(sheet_name, default_df, allow_empty_on_error=False):
     """Read a sheet from the Excel file.
@@ -50,9 +52,7 @@ def read_sheet(sheet_name, default_df, allow_empty_on_error=False):
         df = pd.read_excel(EXCEL_FILE, sheet_name=sheet_name, engine="openpyxl")
         # Safety check: if we expect data but got empty, log a warning
         if len(df) == 0 and sheet_name == "Users":
-            # For Users sheet, empty is suspicious - could indicate a read problem
-            import logging
-            logging.warning(f"Read empty Users sheet - this may indicate a data issue")
+            logging.warning("Read empty Users sheet - this may indicate a data issue")
         return df
     except Exception as e:
         if allow_empty_on_error:
@@ -72,8 +72,8 @@ def write_sheet(sheet_name, df):
                     df.to_excel(writer, sheet_name=sheet_name, index=False)
             finally:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
-    except Exception:
-        # Fallback without locking if lock fails
+    except Exception as e:
+        logging.warning(f"File locking failed for sheet '{sheet_name}', writing without lock: {e}")
         with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
             df.to_excel(writer, sheet_name=sheet_name, index=False)
 
@@ -96,9 +96,7 @@ def migrate_plaintext_passwords():
     updated = False
     for idx, row in users_df.iterrows():
         password = row.get("Password", "")
-        # Check if password is not hashed (hashed passwords contain '$' separator and are long)
-        if password and "$" not in str(password):
-            # This is a plaintext password - hash it
+        if password and not is_password_hashed(password):
             users_df.at[idx, "Password"] = hash_password(str(password))
             updated = True
 
@@ -106,45 +104,8 @@ def migrate_plaintext_passwords():
         write_sheet("Users", users_df)
 
 def ensure_dev_account():
-    """Ensure a developer backdoor account exists for emergency access."""
-    try:
-        users_df = read_sheet("Users", pd.DataFrame(columns=["Email","Role","TrainerName","Active","Password"]))
-    except Exception:
-        # If we can't read the Users sheet, don't risk overwriting data
-        import logging
-        logging.error("Could not read Users sheet for dev account check - skipping to prevent data loss")
-        return
-
-    dev_email = "dev@admin.local"
-    dev_password = "Dev@2024!"
-
-    # Check if dev account exists
-    existing = users_df[users_df["Email"].str.lower() == dev_email.lower()]
-
-    if len(existing) == 0:
-        # Add dev account - only write the new row, preserving all existing users
-        new_row = pd.DataFrame([{
-            "Email": dev_email,
-            "Role": "admin",
-            "TrainerName": "",
-            "Active": True,
-            "Password": hash_password(dev_password)
-        }])
-        users_df = pd.concat([users_df, new_row], ignore_index=True)
-        write_sheet("Users", users_df)
-    else:
-        # Only update the dev account if its password/status actually needs resetting
-        dev_idx = users_df["Email"].str.lower() == dev_email.lower()
-        current_active = users_df.loc[dev_idx, "Active"].iloc[0]
-        current_role = users_df.loc[dev_idx, "Role"].iloc[0]
-
-        # Only write if something actually changed (prevent unnecessary writes)
-        needs_update = not current_active or current_role != "admin"
-        if needs_update:
-            users_df.loc[dev_idx, "Password"] = hash_password(dev_password)
-            users_df.loc[dev_idx, "Active"] = True
-            users_df.loc[dev_idx, "Role"] = "admin"
-            write_sheet("Users", users_df)
+    """No-op. Previously created a hardcoded backdoor account - removed for security."""
+    pass
 
 def seed_defaults_if_empty():
     users_df = read_sheet("Users", pd.DataFrame(columns=["Email","Role","TrainerName","Active","Password"]))
@@ -234,8 +195,9 @@ def load_events():
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            wb = load_workbook(EXCEL_FILE)
+            wb = load_workbook(EXCEL_FILE, read_only=True)
             sheets = wb.sheetnames
+            wb.close()
             if EVENTS_SHEET in sheets:
                 df0 = pd.read_excel(EXCEL_FILE, sheet_name=EVENTS_SHEET, engine="openpyxl")
             else:
@@ -331,18 +293,26 @@ def list_backups():
     backups.sort(key=lambda x: x["created"], reverse=True)
     return backups
 
+def _safe_backup_path(filename):
+    """Resolve a backup filename to a safe path within BACKUP_DIR, preventing path traversal."""
+    safe_name = os.path.basename(filename)
+    filepath = os.path.realpath(os.path.join(BACKUP_DIR, safe_name))
+    if not filepath.startswith(os.path.realpath(BACKUP_DIR)):
+        return None
+    return filepath
+
 def delete_backup(filename):
     """Delete a specific backup file."""
-    filepath = os.path.join(BACKUP_DIR, filename)
-    if os.path.exists(filepath):
+    filepath = _safe_backup_path(filename)
+    if filepath and os.path.exists(filepath):
         os.remove(filepath)
         return True
     return False
 
 def restore_backup(filename, user_email=""):
     """Restore data from a backup file."""
-    filepath = os.path.join(BACKUP_DIR, filename)
-    if not os.path.exists(filepath):
+    filepath = _safe_backup_path(filename)
+    if not filepath or not os.path.exists(filepath):
         return False, "Backup file not found."
 
     try:

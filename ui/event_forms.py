@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 from io import BytesIO
-from core.utils import generate_title, trainer_matches
+from core.utils import generate_title, trainer_matches, sanitize_text, validate_text_input, MAX_TEXT_LENGTH, MAX_CLIENT_LENGTH, MAX_NOTES_LENGTH
 from core.rules import is_date_blocked_for_trainer
 from core.storage import save_events, append_audit
 
@@ -66,6 +66,23 @@ def new_event_tab(df, user_email, TRAINERS, TYPES, STATUSES, SOURCES, MEDIUMS, L
             if end_date < start_date:
                 st.error("❌ End Date cannot be before Start Date!")
                 return df
+
+            # Validate text inputs
+            for field_val, field_name, max_len in [
+                (client, "Client", MAX_CLIENT_LENGTH),
+                (course, "Course/Description", MAX_TEXT_LENGTH),
+                (billing, "Billing Notes", MAX_NOTES_LENGTH),
+                (notes, "Notes", MAX_NOTES_LENGTH),
+            ]:
+                valid, err = validate_text_input(field_val, field_name, max_len)
+                if not valid:
+                    st.error(f"❌ {err}")
+                    return df
+
+            client = sanitize_text(client, MAX_CLIENT_LENGTH)
+            course = sanitize_text(course, MAX_TEXT_LENGTH)
+            billing = sanitize_text(billing, MAX_NOTES_LENGTH)
+            notes = sanitize_text(notes, MAX_NOTES_LENGTH)
 
             trainers_for_event = TRAINERS if "All" in trainer else trainer
             blocked_dates = []
@@ -201,16 +218,16 @@ def manage_events_tab(df, user_email, TRAINERS, STATUSES, SOURCES, LOCATIONS, ME
                     edit_status = st.selectbox("Status", STATUSES[1:], index=STATUSES[1:].index(selected_event["Status"]) if selected_event["Status"] in STATUSES[1:] else 0)
                     edit_source = st.selectbox("Source", SOURCES[1:], index=SOURCES[1:].index(selected_event["Source"]) if selected_event["Source"] in SOURCES[1:] else 0)
                 with c3:
-                    edit_client = st.text_input("Client", value=selected_event["Client"])
-                    edit_course = st.text_input("Course / Description", value=selected_event["Course/Description"])
+                    edit_client = st.text_input("Client", value=str(selected_event["Client"]) if pd.notna(selected_event["Client"]) else "")
+                    edit_course = st.text_input("Course / Description", value=str(selected_event["Course/Description"]) if pd.notna(selected_event["Course/Description"]) else "")
                     current_trainers = [t.strip() for t in str(selected_event["Trainer Calendar"]).split(",")]
                     edit_trainer = st.multiselect("Trainer Calendar", ["All"] + TRAINERS,
                                                   default=[t for t in current_trainers if t in (["All"] + TRAINERS)])
                     edit_medium = st.selectbox("Medium", MEDIUMS, index=MEDIUMS.index(selected_event["Medium"]) if selected_event["Medium"] in MEDIUMS else 0)
                 edit_location = st.selectbox("Location", LOCATIONS, index=LOCATIONS.index(selected_event["Location"]) if selected_event["Location"] in LOCATIONS else 0)
-                edit_billing = st.text_area("Billing Notes", value=selected_event["Billing"])
-                edit_invoiced = st.selectbox("Invoiced", ["No","Yes"], index=0 if selected_event["Invoiced"]=="No" else 1)
-                edit_notes = st.text_area("Notes", value=selected_event["Notes"])
+                edit_billing = st.text_area("Billing Notes", value=str(selected_event["Billing"]) if pd.notna(selected_event["Billing"]) else "")
+                edit_invoiced = st.selectbox("Invoiced", ["No","Yes"], index=0 if str(selected_event.get("Invoiced","No"))=="No" else 1)
+                edit_notes = st.text_area("Notes", value=str(selected_event["Notes"]) if pd.notna(selected_event["Notes"]) else "")
 
                 if st.form_submit_button("💾 Save Changes", use_container_width=True):
                     if not edit_client or not edit_client.strip():

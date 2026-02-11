@@ -35,7 +35,7 @@ def _render_calendar_tab(df, trainer_name, trainer_color):
         (df["Is Marked"]==True) &
         (df["Marked For"].apply(lambda x: marked_for_includes(x, trainer_name)))
     ]
-    df_my = pd.concat([trainer_events, marked_events], ignore_index=True)
+    df_my = pd.concat([trainer_events, marked_events]).drop_duplicates(subset=df.columns.tolist()).reset_index(drop=True)
 
     col1, col2 = st.columns([1,3])
     with col1:
@@ -123,8 +123,12 @@ def _render_calendar_tab(df, trainer_name, trainer_color):
         if len(day_all)==0:
             st.info("No events on this day.")
         else:
-            blocked_today = day_all[day_all.get("Is Marked", False)==True]
-            normal_today = day_all[day_all.get("Is Marked", False)!=True]
+            if "Is Marked" in day_all.columns:
+                blocked_today = day_all[day_all["Is Marked"]==True]
+                normal_today = day_all[day_all["Is Marked"]!=True]
+            else:
+                blocked_today = day_all.iloc[0:0]
+                normal_today = day_all
             for _, ev in blocked_today.iterrows():
                 with st.expander(f"🚫 BLOCKED: {ev.get('Course/Description','')}", expanded=True):
                     st.error("Blocked for you.")

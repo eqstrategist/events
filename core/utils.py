@@ -40,13 +40,23 @@ def validate_email(email):
         return False, "Email too long."
     return True, None
 
-def generate_title(row):
-    base = f"{row['Status']}-{row['Source']}-{row['Client']} {row['Course/Description']}"
-    medium = row.get('Medium', '')
-    trainer = row.get('Trainer Calendar', '')
-    location = row.get('Location', '')
+def _safe_str(value):
+    """Convert a value to string, treating NaN/None as empty string."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    return str(value)
 
-    # Include Medium for all event types
+def generate_title(row):
+    status = _safe_str(row.get('Status', ''))
+    source = _safe_str(row.get('Source', ''))
+    client = _safe_str(row.get('Client', ''))
+    course = _safe_str(row.get('Course/Description', ''))
+    medium = _safe_str(row.get('Medium', ''))
+    trainer = _safe_str(row.get('Trainer Calendar', ''))
+    location = _safe_str(row.get('Location', ''))
+
+    base = f"{status}-{source}-{client} {course}"
+
     if medium:
         base += f" ({medium})"
     if trainer:
@@ -54,7 +64,7 @@ def generate_title(row):
     if location:
         base += f" {location}"
 
-    return str(base).strip()
+    return base.strip()
 
 def trainer_matches(series, trainer):
     pattern = rf"(^|,\s*){re.escape(trainer)}(\s*,|$)"

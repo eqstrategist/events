@@ -1,11 +1,14 @@
 import streamlit as st
 from core.state import init_state
+from core.logging_config import setup_logging
 from core.storage import load_settings, load_events
 from core.auth import ensure_login, get_current_user_role, get_trainer_name, refresh_session_passwords
 from pages.admin import admin_page
 from pages.viewer import viewer_page
 from pages.trainer import trainer_page
 from core.config import EXCEL_FILE
+
+setup_logging()
 
 st.set_page_config(page_title="EQS Event Scheduling", layout="wide")
 
